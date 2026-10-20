@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#a9cbed" />
+  <title>Wingrush</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Rubik:wght@400;600;800&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <canvas id="scene"></canvas>
+
+  <div id="ui">
+    <div id="vignette"></div>
+    <div id="flash"></div>
+    <div id="popups"></div>
+    <div id="banner"></div>
+
+    <section id="hud" class="hidden">
+      <div class="hud-top">
+        <div class="hud-box"><span class="hud-label">Distanz</span><span id="hud-dist" class="hud-value">0 m</span></div>
+        <div class="hud-box hud-coins"><span class="coin-icon"></span><span id="hud-coins" class="hud-value">0</span></div>
+        <div class="hud-box"><span class="hud-label">Score</span><span id="hud-score" class="hud-value">0</span></div>
+      </div>
+      <div class="hud-bottom">
+        <div id="hud-mult" class="hud-mult">
+          <span id="hud-mult-value">x1</span>
+          <div class="mult-bar"><div id="hud-mult-fill"></div></div>
+          <small>tief fliegen = mehr Münzen</small>
+        </div>
+        <div class="hud-speed"><span id="hud-speed">0</span><small>km/h</small></div>
+      </div>
+      <div id="hud-hint" class="hud-hint">
+        <span class="desk">← → lenken · ↑ hochziehen · ↓ Sturzflug</span>
+        <span class="touch">Ziehen zum Lenken · hoch = steigen · runter = Sturzflug</span>
+      </div>
+    </section>
+
+    <section id="menu" class="screen">
+      <div class="card menu-card">
+        <button id="btn-account" class="account-chip" type="button" disabled>👤 <span id="menu-user">Gast</span></button>
+        <h1 class="logo">WING<span>RUSH</span></h1>
+        <p class="tagline">Je näher am Fels, desto mehr Münzen.</p>
+        <div class="stats-row">
+          <div class="stat"><span class="coin-icon"></span><b id="menu-coins">0</b></div>
+          <div class="stat">🏆 <b id="menu-best">0</b></div>
+        </div>
+        <p id="menu-error" class="form-error hidden"></p>
+        <button id="btn-reconnect" class="btn hidden">Nochmal versuchen</button>
+        <button id="btn-play" class="btn btn-primary btn-big" disabled>Fliegen</button>
+        <div class="btn-row">
+          <button id="btn-slots" class="btn" disabled>🎰 Glücksautomat<span id="slot-badge" class="badge-dot hidden"></span></button>
+          <button id="btn-garage" class="btn" disabled>🧥 Garage</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="gameover" class="screen hidden">
+      <div class="card menu-card">
+        <div id="go-newbest" class="ribbon hidden">Neuer Highscore!</div>
+        <h2 class="title">Crash!</h2>
+        <p id="go-cause" class="muted"></p>
+        <p id="go-error" class="form-error hidden"></p>
+        <div class="result-grid">
+          <div><span>Distanz</span><b id="go-dist"></b></div>
+          <div><span>Score</span><b id="go-score"></b></div>
+          <div class="hl"><span>Münzen</span><b id="go-coins"></b></div>
+          <div><span>Max. Multi</span><b id="go-mult"></b></div>
+        </div>
+        <button id="btn-double" class="btn btn-ad">▶ Münzen verdoppeln <small>Werbung</small></button>
+        <button id="btn-retry" class="btn btn-primary btn-big">Nochmal <small>Leertaste</small></button>
+        <div class="btn-row">
+          <button id="btn-go-slots" class="btn">🎰 Automat</button>
+          <button id="btn-menu" class="btn btn-ghost">Menü</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="slots" class="screen hidden">
+      <div id="coin-rain" class="coin-rain" aria-hidden="true"></div>
+      <div class="card slot-card">
+        <h2 class="title">Glücksautomat</h2>
+        <div id="machine" class="machine">
+          <div id="bulbs" class="bulbs" aria-hidden="true"></div>
+          <div class="reels">
+            <div class="reel"><div class="strip"></div></div>
+            <div class="reel"><div class="strip"></div></div>
+            <div class="reel"><div class="strip"></div></div>
+          </div>
+          <div class="payline"></div>
+          <div id="slot-flash" class="slot-flash"></div>
+          <button id="lever" class="lever" type="button" aria-label="Hebel ziehen"><span class="lever-arm"><span class="lever-knob"></span></span></button>
+        </div>
+        <div id="slot-result" class="slot-result"></div>
+        <div id="paytable" class="paytable"></div>
+        <div class="stats-row"><div class="stat"><span class="coin-icon"></span><b id="slot-coins">0</b></div></div>
+        <button id="btn-spin" class="btn btn-primary btn-big">Drehen <small id="spin-cost">100</small></button>
+        <button class="btn btn-ghost" data-back>Zurück</button>
+      </div>
+    </section>
+
+    <section id="garage" class="screen hidden">
+      <div class="card garage-card">
+        <h2 class="title">Garage</h2>
+        <div class="tabs">
+          <button class="tab active" data-cat="suit">Anzüge</button>
+          <button class="tab" data-cat="trail">Spuren</button>
+        </div>
+        <div class="progress"><div id="garage-progress-fill"></div><span id="garage-progress"></span></div>
+        <div id="garage-grid" class="item-grid"></div>
+        <button class="btn btn-ghost" data-back>Zurück</button>
+      </div>
+    </section>
+
+    <section id="account" class="screen hidden">
+      <div class="card account-card">
+        <h2 class="title">Konto</h2>
+        <div id="account-guest" class="account-body">
+          <p class="muted">Als Gast ist dein Fortschritt nur auf diesem Gerät gespeichert. Registriere dich, um ihn zu sichern.</p>
+          <div class="tabs">
+            <button class="tab active" data-mode="signup" type="button">Registrieren</button>
+            <button class="tab" data-mode="login" type="button">Anmelden</button>
+          </div>
+          <form id="account-form" class="account-form" novalidate>
+            <label>Benutzername
+              <input id="account-username" name="username" autocomplete="username" maxlength="20" autocapitalize="none" autocorrect="off" spellcheck="false" />
+            </label>
+            <label>Passwort
+              <input id="account-password" name="password" type="password" autocomplete="new-password" maxlength="128" />
+            </label>
+            <p id="account-warning" class="account-warning hidden">Beim Anmelden geht dein Gast-Fortschritt verloren. Registriere dich stattdessen, um ihn zu behalten.</p>
+            <p id="account-error" class="form-error" aria-live="polite"></p>
+            <button id="account-submit" class="btn btn-primary" type="submit">Registrieren</button>
+          </form>
+        </div>
+        <div id="account-user" class="account-body hidden">
+          <p>Angemeldet als <b id="account-name"></b></p>
+          <button id="btn-logout" class="btn" type="button">Abmelden</button>
+        </div>
+        <button class="btn btn-ghost" data-back type="button">Zurück</button>
+      </div>
+    </section>
+
+    <div id="ad-overlay" class="hidden">
+      <div class="ad-box">
+        <div class="ad-count" id="ad-count">3</div>
+        <b>Werbung läuft …</b>
+        <small>Platzhalter – hier kommt später das Rewarded Ad</small>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
