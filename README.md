@@ -153,12 +153,27 @@ Benutzernamen: 3–20 Zeichen `A–Z a–z 0–9 _ . -`, Gross-/Kleinschreibung 
 
 ### Deploy auf Infomaniak
 
-1. Ganzes Repo hochladen. Der Server importiert `src/shared/` und braucht die `package.json` im Root (`"type": "module"`).
-2. Build-Befehl: `npm ci && npm run build && npm --prefix server ci --omit=dev`
-3. Start-Befehl: `node server/src/index.js` (liefert API **und** `dist/` aus, also eine Domain ohne CORS)
-4. Umgebungsvariablen im Panel setzen (`DB_*`, `TRUST_PROXY=1`), oder `server/.env` auf dem Server anlegen.
-5. Schema einmalig anlegen: `npm --prefix server run db:init`, oder `server/sql/schema.sql` in phpMyAdmin ausführen.
-6. Im Panel Node-Version ≥ 20.19 wählen.
+Zugangsdaten gehören nie ins Repo (es ist öffentlich), sondern in die Umgebungsvariablen im Infomaniak-Panel oder in `server/.env` auf dem Server.
+
+1. **Node-Version:** im Panel Node 22 wählen (Vite 8 braucht ≥ 20.19).
+2. **Build-Befehl:** `npm run build:deploy`. Er installiert auch die Dev-Pakete für Vite (`--include=dev`), weil Hosts oft `NODE_ENV=production` setzen. Danach baut er `dist/` und installiert den Server.
+3. **Start-Befehl:** `npm start` (= `node server/src/index.js`). Der Server liefert API **und** `dist/` aus, also eine Domain ohne CORS.
+4. **Umgebungsvariablen** im Panel:
+
+   | Key | Wert |
+   |---|---|
+   | `DB_HOST` | Host-Server aus dem Infomaniak-DB-Panel (`….myd.infomaniak.com`) |
+   | `DB_PORT` | `3306` |
+   | `DB_NAME` | Name der Datenbank |
+   | `DB_USER` | DB-Benutzer |
+   | `DB_PASSWORD` | Passwort des DB-Benutzers |
+   | `TRUST_PROXY` | `1` |
+   | `PORT` | nur falls Infomaniak einen bestimmten Port vorgibt |
+
+5. **Verbindung prüfen:** `npm run db:check`. Das zeigt die MariaDB-Version und die vorhandenen Tabellen.
+6. **Schema anlegen** (einmalig, danach bei jeder Schema-Änderung): `npm run db:init`. Der Befehl lässt sich gefahrlos wiederholen. Alternativ `server/sql/schema.sql` in phpMyAdmin ausführen.
+
+Die Infomaniak-DB ist von aussen gesperrt. Von deinem eigenen Rechner aus funktionieren `db:check` und `db:init` erst, wenn du im Infomaniak-Panel deine IP für externe Verbindungen freigibst. Vom Hosting aus geht es ohne Freigabe.
 
 ### Bekannte Grenzen
 

@@ -1,12 +1,21 @@
 {
   "name": "wingrush",
   "version": "1.0.0",
-  "description": "Wingsuit-Casual-Game (FHGR) – Frontend-Prototyp",
+  "description": "Wingsuit-Casual-Game (FHGR)",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.19"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "build:single": "vite build --mode single --outDir dist-single"
+    "build:single": "vite build --mode single --outDir dist-single",
+    "build:deploy": "npm ci --include=dev && npm run build && npm --prefix server ci --omit=dev",
+    "start": "node server/src/index.js",
+    "db:init": "npm --prefix server run db:init",
+    "db:check": "npm --prefix server run db:check"
   },
   "dependencies": {
     "three": "^0.186.1"
@@ -14,7 +23,5 @@
   "devDependencies": {
     "vite": "^8.3.4",
     "vite-plugin-singlefile": "^2.3.4"
-  },
-  "private": true,
-  "type": "module"
+  }
 }
