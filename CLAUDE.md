@@ -14,6 +14,8 @@ Wingrush ist ein Casual-3D-Browsergame (Studienprojekt FHGR): Wingsuit-Flug, Mü
 - Spielregeln und Zahlen nur in `src/shared/economy.js`, Items nur in `src/shared/items.js`, Spin-Logik in `src/shared/slots.js` (bekommt den Zufallsgenerator übergeben: Server `crypto.randomInt`, Mock `Math.random`). Diese Dateien dürfen nur einander importieren, keine Pakete (das Backend importiert sie).
 - Spiel- und UI-Code ruft nur `api` aus `src/api/index.js` auf, nie localStorage direkt.
 - Münzen gutschreiben, Spins würfeln und Plausibilität prüfen passiert im Backend (`server/src/routes/game.js`). `mockApi.js` bildet dasselbe Verhalten für den Offline-Modus nach und muss bei Änderungen mitgezogen werden. Nie im Client-Spielcode.
+- `server/sql/schema.sql` läuft bei jedem Serverstart (`server/src/migrate.js`). Deshalb muss jede Änderung wiederholbar sein: `CREATE TABLE IF NOT EXISTS`, `ALTER TABLE … ADD COLUMN IF NOT EXISTS` / `DROP COLUMN IF EXISTS` / `MODIFY COLUMN`. Bestehende Statements nie umschreiben, sondern neue anhängen.
+- `.env`, `server/.env` und `wingrush.env` (neben dem Repo, für das Hosting) nie lesen oder bearbeiten.
 - Jede Änderung an Münzen oder Runs im Backend läuft in `tx()` und sperrt zuerst die User-Zeile (`SELECT … FOR UPDATE`). Zeitvergleiche nur in SQL.
 - Neue Endpunkte: in `restApi.js` und `mockApi.js` mit gleicher Antwortform ergänzen, Fehler als `{ error: '<Deutsch>' }` (Texte in `server/src/errors.js`).
 - Neue Hindernisse in `src/game/entities.js` mit der Schnittstelle `{ object, getZ(), span, update?(dt, t, focus), hit(p, r) }` anlegen und in `World.populate()` spawnen.

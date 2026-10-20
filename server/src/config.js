@@ -1,8 +1,13 @@
 import { fileURLToPath } from 'node:url';
 
-const ENV_FILE = fileURLToPath(new URL('../.env', import.meta.url));
+const ENV_FILES = [
+  fileURLToPath(new URL('../.env', import.meta.url)),
+  fileURLToPath(new URL('../../../wingrush.env', import.meta.url)),
+];
 
-try { process.loadEnvFile(ENV_FILE); } catch {}
+for (const file of ENV_FILES) {
+  try { process.loadEnvFile(file); } catch {}
+}
 
 function required(name) {
   const value = process.env[name];

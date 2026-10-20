@@ -104,7 +104,7 @@ mariadb -u "$(whoami)" -e "
 cd server
 cp .env.example .env      # Werte eintragen
 npm install
-npm run db:init           # Tabellen anlegen
+npm run db:init           # Tabellen anlegen (passiert auch automatisch beim Start)
 npm run dev               # http://localhost:3000/api/health
 npm test                  # Tests gegen DB_NAME_TEST (wird dabei geleert!)
 ```
@@ -153,27 +153,35 @@ Benutzernamen: 3–20 Zeichen `A–Z a–z 0–9 _ . -`, Gross-/Kleinschreibung 
 
 ### Deploy auf Infomaniak
 
-Zugangsdaten gehören nie ins Repo (es ist öffentlich), sondern in die Umgebungsvariablen im Infomaniak-Panel oder in `server/.env` auf dem Server.
+Zugangsdaten gehören nie ins Repo (es ist öffentlich).
 
-1. **Node-Version:** im Panel Node 22 wählen (Vite 8 braucht ≥ 20.19).
-2. **Build-Befehl:** `npm run build:deploy`. Er installiert auch die Dev-Pakete für Vite (`--include=dev`), weil Hosts oft `NODE_ENV=production` setzen. Danach baut er `dist/` und installiert den Server.
-3. **Start-Befehl:** `npm start` (= `node server/src/index.js`). Der Server liefert API **und** `dist/` aus, also eine Domain ohne CORS.
-4. **Umgebungsvariablen** im Panel:
+**Wo der Server die Zugangsdaten sucht** (die erste Fundstelle gewinnt):
+1. Umgebungsvariablen des Hosts
+2. `server/.env` im Repo (lokal)
+3. `wingrush.env` **neben** dem Repo-Ordner, also `<repo>/../wingrush.env`. Das ist der empfohlene Ort auf dem Server: Die Datei liegt ausserhalb von Git und überlebt `git pull` genauso wie ein komplettes Neu-Klonen.
 
-   | Key | Wert |
-   |---|---|
-   | `DB_HOST` | Host-Server aus dem Infomaniak-DB-Panel (`….myd.infomaniak.com`) |
-   | `DB_PORT` | `3306` |
-   | `DB_NAME` | Name der Datenbank |
-   | `DB_USER` | DB-Benutzer |
-   | `DB_PASSWORD` | Passwort des DB-Benutzers |
-   | `TRUST_PROXY` | `1` |
-   | `PORT` | nur falls Infomaniak einen bestimmten Port vorgibt |
+**Einrichten (einmalig):**
+1. Per SSH oder FTP das Repo auf den Server klonen, z. B. nach `~/sites/im5-game`.
+2. Daneben `~/sites/wingrush.env` anlegen:
+   ```
+   DB_HOST=<Host-Server aus dem DB-Panel>
+   DB_PORT=3306
+   DB_NAME=<Datenbank>
+   DB_USER=<DB-Benutzer>
+   DB_PASSWORD=<Passwort>
+   TRUST_PROXY=1
+   ```
+3. Im Manager bei der Node.js-Site:
+   - **Ausführungsordner:** der Repo-Ordner (dort liegt die `package.json`)
+   - **Node-Version:** 22 (Vite 8 braucht ≥ 20.19)
+   - **Build-Befehl:** `git pull && npm run build:deploy`
+   - **Start-Befehl:** `npm start`
+   - Den Port übergibt Infomaniak über `PORT`, der Server nutzt ihn automatisch.
+4. App im Manager neu starten.
 
-5. **Verbindung prüfen:** `npm run db:check`. Das zeigt die MariaDB-Version und die vorhandenen Tabellen.
-6. **Schema anlegen** (einmalig, danach bei jeder Schema-Änderung): `npm run db:init`. Der Befehl lässt sich gefahrlos wiederholen. Alternativ `server/sql/schema.sql` in phpMyAdmin ausführen.
+**Datenbank:** Tabellen werden beim Serverstart automatisch angelegt und angepasst (`server/sql/schema.sql`). Einen manuellen Schritt braucht es nicht. Schlägt das fehl (z. B. falsches Passwort), bricht der Start mit einer Meldung ab. `npm run db:check` zeigt Verbindung und Tabellen, `npm run db:init` führt das Schema manuell aus.
 
-Die Infomaniak-DB ist von aussen gesperrt. Von deinem eigenen Rechner aus funktionieren `db:check` und `db:init` erst, wenn du im Infomaniak-Panel deine IP für externe Verbindungen freigibst. Vom Hosting aus geht es ohne Freigabe.
+Die Infomaniak-DB ist von aussen gesperrt. Vom eigenen Rechner aus geht es nur, wenn du im DB-Panel deine IP freigibst. Vom Hosting aus funktioniert es ohne Freigabe.
 
 ### Bekannte Grenzen
 
