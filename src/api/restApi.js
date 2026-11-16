@@ -1,8 +1,11 @@
 const BASE = import.meta.env.VITE_API_URL || '/api';
 const TOKEN_KEY = 'wingrush.token';
+const GUEST_KEY = 'wingrush.guest';
 
 let memoryToken = null;
+let memoryGuest = false;
 let pendingGuest = null;
+let notice = null;
 
 function readToken() {
   try { return localStorage.getItem(TOKEN_KEY); } catch (e) { return memoryToken; }
@@ -13,6 +16,18 @@ function writeToken(token) {
   try {
     if (token) localStorage.setItem(TOKEN_KEY, token);
     else localStorage.removeItem(TOKEN_KEY);
+  } catch (e) {}
+}
+
+function readGuest() {
+  try { return localStorage.getItem(GUEST_KEY) === '1'; } catch (e) { return memoryGuest; }
+}
+
+function writeGuest(isGuest) {
+  memoryGuest = isGuest;
+  try {
+    if (isGuest) localStorage.setItem(GUEST_KEY, '1');
+    else localStorage.removeItem(GUEST_KEY);
   } catch (e) {}
 }
 
@@ -44,7 +59,7 @@ function ensureToken() {
   if (token) return Promise.resolve(token);
   if (!pendingGuest) {
     pendingGuest = request('POST', '/auth/guest', {})
-      .then((res) => { writeToken(res.token); return res.token; })
+      .then((res) => { writeToken(res.token); writeGuest(true); return res.token; })
       .finally(() => { pendingGuest = null; });
   }
   return pendingGuest;
@@ -56,14 +71,25 @@ async function call(method, path, body) {
     return await request(method, path, body, token);
   } catch (e) {
     if (e.status !== 401) throw e;
-    if (readToken() === token) writeToken(null);
+    if (readToken() === token) {
+      if (readGuest()) notice = { wasGuest: true };
+      writeToken(null);
+      writeGuest(false);
+    }
     return request(method, path, body, await ensureToken());
   }
 }
 
 function withNewToken(res) {
   writeToken(res.token);
+  writeGuest(false);
   return { profile: res.profile };
+}
+
+function takeSessionNotice() {
+  const n = notice;
+  notice = null;
+  return n;
 }
 
 export const restApi = {
@@ -81,4 +107,5 @@ export const restApi = {
     if (readToken() === token) writeToken(null);
     return { profile: await call('GET', '/me') };
   },
+  takeSessionNotice,
 };

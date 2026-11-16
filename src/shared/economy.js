@@ -51,4 +51,6 @@ export const DOUBLE = { minDelaySeconds: 3, windowSeconds: 900, maxPerDay: 20 };
 
 export const PLAYTIME = { spinSeconds: 3, slotGapSeconds: 60 };
 
-export const ACCOUNT ={ usernamePattern: /^[A-Za-z0-9_.-]{3,20}$/, passwordMin: 8, passwordMax: 128 };
+export const ACCOUNT = { usernamePattern: /^[A-Za-z0-9_.-]{3,20}$/, passwordMin: 8, passwordMax: 128, guestRetentionHours: 24 };
+
+export const SESSION = { timeoutMinutes: 30, touchSeconds: 60 };

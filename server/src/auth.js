@@ -1,6 +1,7 @@
 import { randomBytes, scrypt as scryptCb, timingSafeEqual, createHash } from 'node:crypto';
 import { promisify } from 'node:util';
 import { ApiError, MSG } from './errors.js';
+import { touch as touchActivity } from './activity.js';
 
 const scrypt = promisify(scryptCb);
 const N = 16384, R = 8, P = 1, KEYLEN = 64;
@@ -42,12 +43,13 @@ export async function createSession(conn, userId, days) {
   return token;
 }
 
-export function authenticate(pool, config, { optional = false } = {}) {
+export function authenticate(pool, config, { optional = false, touch = true } = {}) {
   return async (req, res, next) => {
     const token = readToken(req);
     const tokenHash = token && hashToken(token);
     const rows = tokenHash ? await pool.query(
-      `SELECT s.user_id, u.username, TIMESTAMPDIFF(SECOND, s.refreshed_at, NOW(3)) AS age
+      `SELECT s.user_id, u.username, TIMESTAMPDIFF(SECOND, s.refreshed_at, NOW(3)) AS age,
+         TIMESTAMPDIFF(SECOND, u.last_seen_at, NOW(3)) AS idle
        FROM sessions s JOIN users u ON u.id = s.user_id
        WHERE s.token_hash = ? AND s.expires_at > NOW(3)`,
       [tokenHash],
@@ -62,8 +64,8 @@ export function authenticate(pool, config, { optional = false } = {}) {
         'UPDATE sessions SET refreshed_at = NOW(3), expires_at = NOW(3) + INTERVAL ? DAY WHERE token_hash = ?',
         [config.sessionDays, tokenHash],
       );
-      await pool.query('UPDATE users SET last_seen_at = NOW(3) WHERE id = ?', [session.user_id]);
     }
+    if (touch) await touchActivity(pool, session.user_id, session.idle);
     req.user = { id: session.user_id, username: session.username };
     req.tokenHash = tokenHash;
     next();

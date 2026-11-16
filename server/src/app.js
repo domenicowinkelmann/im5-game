@@ -33,7 +33,7 @@ export function createApp({ pool, config }) {
 
   const limits = createLimiters(config);
   const auth = authenticate(pool, config);
-  const optionalAuth = authenticate(pool, config, { optional: true });
+  const optionalAuth = authenticate(pool, config, { optional: true, touch: false });
 
   const api = express.Router();
   if (config.corsOrigins.length) api.use(cors(config.corsOrigins));

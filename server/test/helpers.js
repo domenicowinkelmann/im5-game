@@ -4,7 +4,7 @@ import { loadConfig } from '../src/config.js';
 import { createPool } from '../src/db.js';
 import { createApp } from '../src/app.js';
 
-const TABLES = ['events', 'spins', 'runs', 'loadout', 'inventory', 'sessions', 'users'];
+const TABLES = ['player_archive_days', 'player_archive', 'events', 'spins', 'runs', 'loadout', 'inventory', 'sessions', 'users'];
 
 export async function resetDatabase(config) {
   const sql = await readFile(new URL('../sql/schema.sql', import.meta.url), 'utf8');
@@ -42,5 +42,5 @@ export async function startServer() {
     await pool.end();
   }
 
-  return { call, pool, stop };
+  return { call, pool, config, stop };
 }

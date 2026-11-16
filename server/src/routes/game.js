@@ -40,14 +40,14 @@ export function gameRoutes({ pool, limits, auth }) {
     const uid = req.user.id;
     res.json(await tx(pool, async (conn) => {
       const user = await lockUser(conn, uid,
-        'highscore, TIMESTAMPDIFF(MICROSECOND, COALESCE(last_run_at, created_at), NOW(3)) / 1000000 AS elapsed');
+        'highscore, session_no, TIMESTAMPDIFF(MICROSECOND, COALESCE(last_run_at, created_at), NOW(3)) / 1000000 AS elapsed');
       if (!fitsElapsed(run.duration, Number(user.elapsed))) throw new ApiError(400, MSG.runRejected);
       const runId = randomBytes(16).toString('base64url');
       const durationMs = Math.round(run.duration * 1000);
       await conn.query(
-        `INSERT INTO runs (public_id, user_id, distance, score, coins, duration_ms, max_multiplier, tunnels, cause, coins_by_type)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [runId, uid, run.distance, run.score, run.coins, durationMs,
+        `INSERT INTO runs (public_id, user_id, session_no, distance, score, coins, duration_ms, max_multiplier, tunnels, cause, coins_by_type)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [runId, uid, user.session_no, run.distance, run.score, run.coins, durationMs,
           run.maxMultiplier, run.tunnels, run.cause, JSON.stringify(run.coinsByType)],
       );
       await conn.query(
@@ -90,7 +90,7 @@ export function gameRoutes({ pool, limits, auth }) {
   r.post('/spin', auth, limits.play, async (req, res) => {
     const uid = req.user.id;
     res.json(await tx(pool, async (conn) => {
-      const user = await lockUser(conn, uid, 'coins');
+      const user = await lockUser(conn, uid, 'coins, session_no');
       if (user.coins < SPIN_COST) throw new ApiError(400, MSG.notEnoughCoins);
       const owned = await ownedItems(conn, uid);
       const [{ gap_ms: gapMs }] = await conn.query(
@@ -107,8 +107,10 @@ export function gameRoutes({ pool, limits, auth }) {
         [delta, slotMs, uid],
       );
       await conn.query(
-        'INSERT INTO spins (user_id, outcome, reels, item_id, duplicate, coins_delta) VALUES (?, ?, ?, ?, ?, ?)',
-        [uid, spin.outcome, JSON.stringify(spin.reels), spin.item?.id ?? null, result.duplicate ? 1 : 0, delta],
+        `INSERT INTO spins (user_id, session_no, outcome, reels, item_id, duplicate, coins_delta, slot_ms)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [uid, user.session_no, spin.outcome, JSON.stringify(spin.reels), spin.item?.id ?? null,
+          result.duplicate ? 1 : 0, delta, slotMs],
       );
       return { reels: spin.reels, result, profile: await loadProfile(conn, uid) };
     }));

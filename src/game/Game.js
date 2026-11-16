@@ -5,7 +5,7 @@ import { Input } from './Input.js';
 import { audio } from './audio.js';
 import { api } from '../api/index.js';
 import { showRewardedAd } from '../ads/adHooks.js';
-import { COIN_TYPES, MULTIPLIER, TUNNEL_BONUS, STYLE_PER_SECOND } from '../shared/economy.js';
+import { COIN_TYPES, MULTIPLIER, TUNNEL_BONUS, STYLE_PER_SECOND, ACCOUNT } from '../shared/economy.js';
 
 const HORIZON = new THREE.Color('#a9cbed');
 const clamp = THREE.MathUtils.clamp;
@@ -106,6 +106,14 @@ export class Game {
     this.profile = p;
     this.ui.setProfile(p);
     this.player.setLoadout(p.equipped);
+    this.showSessionNotice();
+  }
+
+  showSessionNotice() {
+    if (!api.takeSessionNotice()?.wasGuest) return;
+    const hours = ACCOUNT.guestRetentionHours;
+    this.ui.showNotice(`Dein Gast-Spielstand wurde gelöscht, weil du länger als ${hours} Stunden nicht gespielt hast. ` +
+      'Du startest mit einem neuen Spielstand. Registriere dich, damit dein Fortschritt gesichert bleibt.');
   }
 
   startRun() {

@@ -20,7 +20,7 @@ export function loadConfig(env = process.env) {
     trustProxy: Number(env.TRUST_PROXY) || false,
     corsOrigins: (env.CORS_ORIGIN || '').split(',').map((s) => s.trim()).filter(Boolean),
     sessionDays: 90,
-    guestRetentionDays: 180,
+    jobs: { intervalMinutes: 15, cleanupBatch: 100 },
     db: {
       host: env.DB_HOST || '127.0.0.1',
       port: Number(env.DB_PORT) || 3306,

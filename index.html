@@ -115,7 +115,7 @@
       <div class="card account-card">
         <h2 class="title">Konto</h2>
         <div id="account-guest" class="account-body">
-          <p class="muted">Als Gast ist dein Fortschritt nur auf diesem Gerät gespeichert. Registriere dich, um ihn zu sichern.</p>
+          <p id="account-guest-note" class="muted"></p>
           <div class="tabs">
             <button class="tab active" data-mode="signup" type="button">Registrieren</button>
             <button class="tab" data-mode="login" type="button">Anmelden</button>
@@ -139,6 +139,14 @@
         <button class="btn btn-ghost" data-back type="button">Zurück</button>
       </div>
     </section>
+
+    <div id="notice" class="modal notice hidden" role="dialog" aria-modal="true" aria-labelledby="notice-title" aria-describedby="notice-text" tabindex="-1">
+      <div class="card notice-card">
+        <h2 id="notice-title" class="title">Hinweis</h2>
+        <p id="notice-text"></p>
+        <button id="btn-notice-ok" class="btn btn-primary" type="button">OK</button>
+      </div>
+    </div>
 
     <div id="ad-overlay" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="ad-title" tabindex="-1">
       <div class="ad-box">

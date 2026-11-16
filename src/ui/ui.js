@@ -45,6 +45,8 @@ export class UI {
       mult: $('hud-mult'), multValue: $('hud-mult-value'), multFill: $('hud-mult-fill'), hint: $('hud-hint'),
     };
     $('spin-cost').textContent = SPIN_COST;
+    $('account-guest-note').textContent =
+      `Als Gast wird dein Spielstand nach ${ACCOUNT.guestRetentionHours} Stunden ohne Spiel gelöscht. Registriere dich, um ihn zu sichern.`;
     this.reelsMoving = false;
     this.reelState = [0, 1, 2].map(() => [randomSymbol(), randomSymbol(), randomSymbol()]);
     this.buildMachine();
@@ -75,6 +77,7 @@ export class UI {
     });
     $('btn-double').onclick = () => { $('btn-double').disabled = true; game.doubleCoins(); };
     $('btn-account').onclick = () => this.openAccount();
+    $('btn-notice-ok').onclick = () => this.closeNotice();
     $('btn-reconnect').onclick = () => game.loadProfile();
     $('btn-logout').onclick = () => this.logout();
     $('account-form').onsubmit = (e) => { e.preventDefault(); this.submitAccount(); };
@@ -242,6 +245,16 @@ export class UI {
     const i = items.indexOf(document.activeElement);
     const next = e.shiftKey ? (i <= 0 ? items.length - 1 : i - 1) : (i + 1) % items.length;
     items[next].focus({ preventScroll: true });
+  }
+
+  showNotice(text) {
+    const el = $('notice');
+    $('notice-text').textContent = text;
+    if (!this.modals.some((m) => m.element === el)) this.pushModal(el, { dismissable: true });
+  }
+
+  closeNotice() {
+    if (this.modals.at(-1)?.element === $('notice')) this.popModal();
   }
 
   fakeAd(seconds, kind = 'rewarded') {
