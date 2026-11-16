@@ -14,6 +14,11 @@ const SPIN_MS = { base: 1100, step: 480, tension: 1800, perSymbol: 55 };
 const BULBS = 22;
 const LOSE_LINES = ['Leider nichts.', 'Niete – nochmal?', 'Knapp daneben ist auch vorbei.', 'Diesmal nicht.'];
 const CONFETTI = { common: 16, rare: 26, epic: 40, legendary: 70 };
+const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]';
+const AD_TEXT = {
+  rewarded: { title: 'Werbung läuft …', note: 'Platzhalter – hier kommt später das Rewarded Ad' },
+  interstitial: { title: 'Kurze Werbepause …', note: 'Platzhalter – hier kommt später das Interstitial Ad' },
+};
 
 export function swatch(item, big = false) {
   let bg;
@@ -33,6 +38,7 @@ export class UI {
     this.lastMult = 1;
     this.accountMode = 'signup';
     this.accountBusy = false;
+    this.modals = [];
     this.el = {
       vignette: $('vignette'), flash: $('flash'), popups: $('popups'), banner: $('banner'),
       dist: $('hud-dist'), coins: $('hud-coins'), score: $('hud-score'), speed: $('hud-speed'),
@@ -55,9 +61,14 @@ export class UI {
     $('btn-spin').onclick = () => this.spin();
     $('lever').onclick = () => this.spin();
     window.addEventListener('keydown', (e) => {
-      if (this.current !== 'slots' || e.code !== 'Space' || e.repeat || isTyping(e.target)) return;
+      if (this.current !== 'slots' || e.code !== 'Space' || e.repeat || this.blocked || isTyping(e.target)) return;
       e.preventDefault();
       this.spin();
+    });
+    document.addEventListener('keydown', (e) => this.modalKey(e));
+    document.addEventListener('focusin', (e) => {
+      const top = this.modals.at(-1);
+      if (top && !top.element.contains(e.target)) this.focusModal(top.element);
     });
     window.addEventListener('resize', () => {
       if (this.current === 'slots' && !this.reelsMoving) this.layoutReels();
@@ -186,16 +197,65 @@ export class UI {
     dbl.textContent = message;
   }
 
-  fakeAd(seconds) {
+  get blocked() { return this.modals.length > 0; }
+
+  focusables(el) {
+    return [...el.querySelectorAll(FOCUSABLE)]
+      .filter((x) => x.tabIndex >= 0 && !x.matches(':disabled') && x.getClientRects().length > 0);
+  }
+
+  focusModal(el) {
+    (this.focusables(el)[0] || el).focus({ preventScroll: true });
+  }
+
+  pushModal(element, { dismissable = false, onDismiss = null } = {}) {
+    this.modals.push({ element, dismissable, onDismiss, restore: document.activeElement });
+    if (!element.hasAttribute('tabindex')) element.tabIndex = -1;
+    element.classList.remove('hidden');
+    this.focusModal(element);
+  }
+
+  popModal() {
+    const top = this.modals.pop();
+    if (!top) return;
+    top.element.classList.add('hidden');
+    if (top.restore instanceof HTMLElement) top.restore.focus({ preventScroll: true });
+    const next = this.modals.at(-1);
+    if (next && !next.element.contains(document.activeElement)) this.focusModal(next.element);
+    else if (top.element.contains(document.activeElement)) document.activeElement.blur();
+  }
+
+  modalKey(e) {
+    const top = this.modals.at(-1);
+    if (!top) return;
+    if (e.key === 'Escape') {
+      if (!top.dismissable) return;
+      e.preventDefault();
+      this.popModal();
+      top.onDismiss?.();
+      return;
+    }
+    if (e.key !== 'Tab') return;
+    e.preventDefault();
+    const items = this.focusables(top.element);
+    if (!items.length) return top.element.focus({ preventScroll: true });
+    const i = items.indexOf(document.activeElement);
+    const next = e.shiftKey ? (i <= 0 ? items.length - 1 : i - 1) : (i + 1) % items.length;
+    items[next].focus({ preventScroll: true });
+  }
+
+  fakeAd(seconds, kind = 'rewarded') {
     return new Promise((resolve) => {
-      const o = $('ad-overlay');
+      const text = AD_TEXT[kind] ?? AD_TEXT.rewarded;
       let n = seconds;
+      $('ad-title').textContent = text.title;
+      $('ad-note').textContent = text.note;
       $('ad-count').textContent = n;
-      o.classList.remove('hidden');
+      this.pushModal($('ad-overlay'));
       const iv = setInterval(() => {
         n--;
         $('ad-count').textContent = Math.max(n, 0);
-        if (n <= 0) { clearInterval(iv); o.classList.add('hidden'); resolve(true); }
+        if (n <= 0) { clearInterval(iv); this.popModal(); resolve(true); }
       }, 1000);
     });
   }

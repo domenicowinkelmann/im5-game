@@ -51,6 +51,7 @@ export class Game {
     this.input = new Input(canvas);
 
     this.state = 'menu';
+    this.leaving = false;
     this.clock = new THREE.Clock();
     this.t = 0;
     this.menuPos = new THREE.Vector3();
@@ -65,10 +66,11 @@ export class Game {
     this.resize();
 
     window.addEventListener('keydown', (e) => {
-      if ((e.code === 'Space' || e.code === 'Enter') && this.state === 'dead' && this.ui.current === 'gameover') {
-        e.preventDefault();
-        this.startRun();
-      }
+      if (e.code !== 'Space' && e.code !== 'Enter') return;
+      if (this.state !== 'dead' || this.ui.current !== 'gameover' || this.ui.blocked || this.leaving) return;
+      if (e.target instanceof HTMLButtonElement && e.target.id !== 'btn-retry') return;
+      e.preventDefault();
+      this.startRun();
     });
   }
 
@@ -167,12 +169,13 @@ export class Game {
   }
 
   async doubleCoins() {
-    if (!this.lastRunId) return;
+    const runId = this.lastRunId;
+    if (!runId) return;
     api.trackEvent('rewarded_ad_start', { placement: 'double_coins' });
     const watched = await showRewardedAd(this.ui);
     if (!watched) return;
     try {
-      const res = await api.claimDouble(this.lastRunId);
+      const res = await api.claimDouble(runId);
       this.applyProfile(res.profile);
       this.ui.markDoubled(res.profile);
       api.trackEvent('rewarded_ad_complete', { placement: 'double_coins' });

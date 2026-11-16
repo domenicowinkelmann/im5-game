@@ -337,10 +337,12 @@ html, body {
 .swatch.glow { box-shadow: 0 0 0 3px #fff, 0 0 18px var(--sw); }
 .locked-swatch { display: flex; align-items: center; justify-content: center; background: #dfe5ec; color: #9aa7b8; font-family: var(--display); font-size: 24px; }
 
-#ad-overlay {
-  position: absolute; inset: 0; pointer-events: auto; background: rgba(5, 10, 20, 0.92); color: #fff;
-  display: flex; align-items: center; justify-content: center; text-align: center;
+.modal {
+  position: absolute; inset: 0; z-index: 10; pointer-events: auto;
+  display: flex; align-items: center; justify-content: center;
 }
+.modal:focus { outline: none; }
+#ad-overlay { z-index: 10; background: rgba(5, 10, 20, 0.92); color: #fff; text-align: center; }
 .ad-box { display: flex; flex-direction: column; gap: 8px; align-items: center; }
 .ad-count { font-family: var(--display); font-size: 80px; line-height: 1; }
 .ad-box small { opacity: 0.6; }

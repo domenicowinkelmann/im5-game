@@ -5,9 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#a9cbed" />
   <title>Wingrush</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Rubik:wght@400;600;800&display=swap" rel="stylesheet" />
 </head>
 <body>
   <canvas id="scene"></canvas>
@@ -143,11 +140,11 @@
       </div>
     </section>
 
-    <div id="ad-overlay" class="hidden">
+    <div id="ad-overlay" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="ad-title" tabindex="-1">
       <div class="ad-box">
         <div class="ad-count" id="ad-count">3</div>
-        <b>Werbung läuft …</b>
-        <small>Platzhalter – hier kommt später das Rewarded Ad</small>
+        <b id="ad-title">Werbung läuft …</b>
+        <small id="ad-note">Platzhalter – hier kommt später das Rewarded Ad</small>
       </div>
     </div>
   </div>
