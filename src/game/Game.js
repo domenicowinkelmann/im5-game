@@ -160,7 +160,7 @@ export class Game {
     let res = null, error = null;
     try { res = await api.submitRun(payload); } catch (e) { error = e.message; }
     if (res) { this.lastRunId = res.runId; this.applyProfile(res.profile); }
-    api.trackEvent('run_end', { ...payload, newHighscore: !!res?.newHighscore });
+    api.trackEvent('run_end', { ...payload, accepted: !!res, newHighscore: !!res?.newHighscore });
     if (res?.newHighscore) api.trackEvent('new_highscore', { score: payload.score });
     this.state = 'dead';
     this.ui.showGameOver(payload, res, error);

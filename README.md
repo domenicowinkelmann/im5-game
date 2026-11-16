@@ -53,10 +53,11 @@ Alle Zahlen stehen in `src/shared/economy.js`, alle Skins in `src/shared/items.j
 src/
   main.js              Einstieg
   style.css            komplettes UI-Styling
-  shared/              Regeln & Items (später auch vom Backend importiert)
+  shared/              Regeln & Items (vom Backend und vom Mock importiert)
     economy.js
     items.js
     slots.js           Spin-Logik (Server und Mock)
+    runs.js            Plausibilität eingereichter Runs (Server und Mock)
   api/
     index.js           wählt Mock oder echtes Backend
     mockApi.js         simuliert Backend im Browser (localStorage)
@@ -84,7 +85,6 @@ server/
     profile.js         Profil wie im Mock
     limits.js          Rate-Limits
     routes/            auth.js, game.js
-    game/runs.js       Plausibilität eingereichter Runs
   test/                node:test, Unit- und API-Tests
 ```
 
@@ -108,6 +108,20 @@ npm run db:init           # Tabellen anlegen (passiert auch automatisch beim Sta
 npm run dev               # http://localhost:3000/api/health
 npm test                  # Tests gegen DB_NAME_TEST (wird dabei geleert!)
 ```
+
+### Lokal unter Windows (ohne Docker und Admin-Rechte)
+
+Eine portable MariaDB 10.11.19 (gleiche Version wie Infomaniak) liegt neben dem Repo in `../mariadb`, also ausserhalb von Git.
+
+```bash
+npm install && npm --prefix server install
+npm run db:local:setup    # einmalig: Download + Prüfsumme, Datenordner, legt server/.env mit lokalem Zufallspasswort an
+npm run db:local:start    # MariaDB im Hintergrund starten (nur 127.0.0.1:3306)
+npm run db:local:status
+npm run db:local:stop
+```
+
+Danach in zwei Terminals `npm --prefix server run dev` (Backend, legt die Tabellen an) und `npm run dev` (Frontend). Die Skripte verweigern den Dienst, wenn `DB_HOST` in `server/.env` nicht lokal ist. Lokal wird die Infomaniak-DB also nie angefasst.
 
 ### server/.env
 
@@ -143,6 +157,12 @@ Alle unter `/api`, JSON. Fehler kommen als `{ "error": "<Meldung>" }`. Ausser be
 
 Grundsatz: **Der Server ist der Chef über Münzen und Spins.** Der Client zeigt nur an.
 
+**Plausibilität eines Runs** (`src/shared/runs.js`, Zahlen in `RUN_LIMITS`):
+- Münzen höchstens 80 pro Sekunde plus Puffer von 500. Den vollen Puffer gibt es erst ab 20 s Flugzeit, kurze Runs bekommen nur einen Anteil.
+- Der Multiplikator muss in der Flugzeit erreichbar sein (eine Stufe pro 1,4 s).
+- Höchstens ein Tunnel pro Chunk (160 m Distanz).
+- Ein Run muss in die echte Zeit seit dem letzten Run passen, mit 0,5 s Abstand (der Crash dauert im Spiel 1,1 s). Runs können zusammen also nie länger dauern als die echte Zeit.
+
 **Spielzeit** (`playTime: { flight, slots, total }` in Sekunden, im Profil) zählt nur der Server:
 - **Flugzeit:** Summe der Run-Dauern.
 - **Glücksautomat:** Abstand zum vorherigen Spin, wenn er höchstens 60 s beträgt, sonst pauschal 3 s pro Spin (`PLAYTIME` in `economy.js`). Leerlauf ohne Spin zählt nicht.
@@ -153,40 +173,36 @@ Benutzernamen: 3–20 Zeichen `A–Z a–z 0–9 _ . -`, Gross-/Kleinschreibung 
 
 ### Deploy auf Infomaniak
 
-Zugangsdaten gehören nie ins Repo (es ist öffentlich).
+Lokal und auf dem Hosting gilt dasselbe: Der Server liest seine Zugangsdaten aus **`server/.env`**. Umgebungsvariablen des Hosts haben Vorrang. Die Datei ist in `.gitignore` und gehört nie ins Repo (es ist öffentlich).
 
-**Wo der Server die Zugangsdaten sucht** (die erste Fundstelle gewinnt):
-1. Umgebungsvariablen des Hosts
-2. `server/.env` im Repo (lokal)
-3. `wingrush.env` **neben** dem Repo-Ordner, also `<repo>/../wingrush.env`. Das ist der empfohlene Ort auf dem Server: Die Datei liegt ausserhalb von Git und überlebt `git pull` genauso wie ein komplettes Neu-Klonen.
+**Hochladen** (per FTP oder Git) in einen Ordner, z. B. `sites/im5-game`. Ohne `node_modules/`, `dist/` und ohne deine lokale `server/.env`.
 
-**Einrichten (einmalig):**
-1. Per SSH oder FTP das Repo auf den Server klonen, z. B. nach `~/sites/im5-game`.
-2. Daneben `~/sites/wingrush.env` anlegen:
-   ```
-   DB_HOST=<Host-Server aus dem DB-Panel>
-   DB_PORT=3306
-   DB_NAME=<Datenbank>
-   DB_USER=<DB-Benutzer>
-   DB_PASSWORD=<Passwort>
-   TRUST_PROXY=1
-   ```
-3. Im Manager bei der Node.js-Site:
-   - **Ausführungsordner:** der Repo-Ordner (dort liegt die `package.json`)
-   - **Node-Version:** 22 (Vite 8 braucht ≥ 20.19)
-   - **Build-Befehl:** `git pull && npm run build:deploy`
-   - **Start-Befehl:** `npm start`
-   - Den Port übergibt Infomaniak über `PORT`, der Server nutzt ihn automatisch.
-4. App im Manager neu starten.
+**Auf dem Server** `server/.env` anlegen:
+```
+DB_HOST=<Host-Server aus dem DB-Panel>
+DB_PORT=3306
+DB_NAME=<Datenbank>
+DB_USER=<DB-Benutzer>
+DB_PASSWORD=<Passwort>
+TRUST_PROXY=1
+```
+Achtung: Bei späteren Uploads nie die lokale `server/.env` mitschicken, sonst wird die Datei auf dem Server überschrieben.
 
-**Datenbank:** Tabellen werden beim Serverstart automatisch angelegt und angepasst (`server/sql/schema.sql`). Einen manuellen Schritt braucht es nicht. Schlägt das fehl (z. B. falsches Passwort), bricht der Start mit einer Meldung ab. `npm run db:check` zeigt Verbindung und Tabellen, `npm run db:init` führt das Schema manuell aus.
+**Im Manager bei der Node.js-Site:**
+- Ausführungsordner: der Projektordner (dort liegt die `package.json`)
+- Node-Version: 22 (Vite 8 braucht ≥ 20.19)
+- Build-Befehl: `npm run build:deploy` (mit Git: `git pull && npm run build:deploy`)
+- Start-Befehl: `npm start`
+- Den Port übergibt Infomaniak über `PORT`, der Server nutzt ihn automatisch.
+
+**Datenbank:** Tabellen werden beim Serverstart automatisch angelegt und angepasst (`server/sql/schema.sql`). Schlägt das fehl (z. B. falsches Passwort), bricht der Start mit einer Meldung ab. `npm run db:check` zeigt Verbindung und Tabellen.
 
 Die Infomaniak-DB ist von aussen gesperrt. Vom eigenen Rechner aus geht es nur, wenn du im DB-Panel deine IP freigibst. Vom Hosting aus funktioniert es ohne Freigabe.
 
 ### Bekannte Grenzen
 
 - **Münzen verdoppeln** ist ohne serverseitige Bestätigung des Werbenetzwerks (SSV) nicht fälschungssicher. Bis dahin gilt: nur einmal pro Run, 3 s bis 15 min nach dem Run, max. 20 Mal pro Tag (`DOUBLE` in `economy.js`).
-- **Mehrere Tabs gleichzeitig:** Ein Run darf nicht länger dauern als die Zeit seit dem letzten Run. Fliegt man in zwei Tabs parallel, wird der zweite Run abgelehnt (Schutz gegen Farming).
+- **Mehrere Tabs gleichzeitig:** Ein Run darf nicht länger dauern als die Zeit seit dem letzten Run (minus 0,5 s). Fliegt man in zwei Tabs parallel, wird der zweite Run abgelehnt (Schutz gegen Farming).
 - Abmelden in einem Tab macht die anderen Tabs beim nächsten Aufruf zu einem neuen Gast.
 
 ## Debug

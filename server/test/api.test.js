@@ -135,12 +135,31 @@ test('runs are rejected when implausible or faster than real time', async () => 
   const fresh = await guest();
   const tooFast = await app.call('POST', '/runs', { token: fresh.token, body: RUN });
   assert.equal(tooFast.status, 400);
-  const short = { ...RUN, duration: 1, distance: 50, score: 50 + 250, coins: 10, coinsByType: { bronze: 10, silver: 0, gold: 0, diamond: 0 }, maxMultiplier: 1 };
-  assert.ok(short.duration <= RUN_LIMITS.timeSlack);
+  const short = { ...RUN, duration: 1, distance: 50, score: 50, coins: 10, coinsByType: { bronze: 10, silver: 0, gold: 0, diamond: 0 }, maxMultiplier: 1, tunnels: 0 };
+  assert.equal((await app.call('POST', '/runs', { token: fresh.token, body: short })).status, 400);
+  await app.pool.query('UPDATE users SET created_at = NOW(3) - INTERVAL 3 SECOND WHERE id = ?', [Number(fresh.profile.userId)]);
   assert.equal((await app.call('POST', '/runs', { token: fresh.token, body: short })).status, 200);
-  assert.equal((await app.call('POST', '/runs', { token: fresh.token, body: RUN })).status, 400);
+  assert.equal((await app.call('POST', '/runs', { token: fresh.token, body: { ...short, duration: 0 } })).status, 400);
   const [u] = await app.pool.query('SELECT total_runs FROM users WHERE id = ?', [Number(fresh.profile.userId)]);
   assert.equal(u.total_runs, 1);
+});
+
+test('short runs in a loop cannot farm coins', async () => {
+  const g = await agedGuest();
+  const uid = Number(g.profile.userId);
+  const farm = {
+    distance: 50, score: 50, coins: 540, duration: 1, maxMultiplier: 1, tunnels: 0, cause: '',
+    coinsByType: { bronze: 40, silver: 0, gold: 0, diamond: 10 },
+  };
+  assert.deepEqual(await app.call('POST', '/runs', { token: g.token, body: farm }), { status: 400, body: { error: 'Run abgelehnt (unplausibel)' } });
+  const fair = { ...farm, coins: 100, coinsByType: { bronze: 0, silver: 0, gold: 10, diamond: 0 } };
+  assert.ok(fair.coins <= RUN_LIMITS.maxCoinsPerSecond + RUN_LIMITS.coinBuffer / RUN_LIMITS.bufferSeconds);
+  const results = [];
+  for (let i = 0; i < 5; i++) results.push((await app.call('POST', '/runs', { token: g.token, body: fair })).status);
+  assert.deepEqual(results, [200, 400, 400, 400, 400]);
+  const [u] = await app.pool.query('SELECT coins, play_flight_ms FROM users WHERE id = ?', [uid]);
+  assert.equal(u.coins, START_COINS + fair.coins);
+  assert.equal(u.play_flight_ms, 1000);
 });
 
 test('parallel runs: only one fits into the elapsed time', async () => {

@@ -18,7 +18,7 @@ export async function resetDatabase(config) {
 }
 
 export async function startServer() {
-  const config = loadConfig();
+  const config = loadConfig({ ...process.env, NODE_ENV: 'test' });
   await resetDatabase(config);
   const pool = createPool(config.db);
   const server = createApp({ pool, config }).listen(0);

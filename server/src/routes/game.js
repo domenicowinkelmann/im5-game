@@ -1,12 +1,12 @@
 import { Router } from 'express';
 import { randomBytes, randomInt } from 'node:crypto';
-import { SPIN_COST, RUN_LIMITS, DOUBLE, PLAYTIME } from '../../../src/shared/economy.js';
+import { SPIN_COST, DOUBLE, PLAYTIME } from '../../../src/shared/economy.js';
 import { rollSpin, spinResult } from '../../../src/shared/slots.js';
 import { getItem } from '../../../src/shared/items.js';
+import { validateRun, fitsElapsed } from '../../../src/shared/runs.js';
 import { tx, withConn } from '../db.js';
 import { ApiError, MSG } from '../errors.js';
 import { loadProfile, ownedItems } from '../profile.js';
-import { validateRun } from '../game/runs.js';
 
 const RUN_ID = /^[A-Za-z0-9_-]{22}$/;
 const EVENT_NAME = /^[a-z_]{1,40}$/;
@@ -41,7 +41,7 @@ export function gameRoutes({ pool, limits, auth }) {
     res.json(await tx(pool, async (conn) => {
       const user = await lockUser(conn, uid,
         'highscore, TIMESTAMPDIFF(MICROSECOND, COALESCE(last_run_at, created_at), NOW(3)) / 1000000 AS elapsed');
-      if (run.duration > Number(user.elapsed) + RUN_LIMITS.timeSlack) throw new ApiError(400, MSG.runRejected);
+      if (!fitsElapsed(run.duration, Number(user.elapsed))) throw new ApiError(400, MSG.runRejected);
       const runId = randomBytes(16).toString('base64url');
       const durationMs = Math.round(run.duration * 1000);
       await conn.query(

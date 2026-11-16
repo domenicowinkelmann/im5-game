@@ -34,7 +34,18 @@ export const SLOT = {
 export const FILLER_SYMBOLS = ['🪙', '🦅', '🚁', '🍀'];
 export const ALL_SYMBOLS = [...RARITY_ORDER.map((r) => RARITIES[r].symbol), ...FILLER_SYMBOLS];
 
-export const RUN_LIMITS = { maxCoinsPerSecond: 40, coinBuffer: 500, maxSpeed: 90, maxDuration: 1800, timeSlack: 5 };
+export const CHUNK_LENGTH = 160;
+
+export const RUN_LIMITS = {
+  maxCoinsPerSecond: 80,
+  coinBuffer: 500,
+  bufferSeconds: 20,
+  maxSpeed: 90,
+  distanceBuffer: 50,
+  maxDuration: 1800,
+  minGapSeconds: 0.5,
+  timeTolerance: 0.05,
+};
 
 export const DOUBLE = { minDelaySeconds: 3, windowSeconds: 900, maxPerDay: 20 };
 

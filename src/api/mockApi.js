@@ -1,6 +1,7 @@
 import { ITEMS, DEFAULT_LOADOUT, getItem } from '../shared/items.js';
-import { SPIN_COST, START_COINS, RUN_LIMITS, DOUBLE, ACCOUNT, PLAYTIME } from '../shared/economy.js';
+import { SPIN_COST, START_COINS, DOUBLE, ACCOUNT, PLAYTIME } from '../shared/economy.js';
 import { rollSpin, spinResult } from '../shared/slots.js';
+import { validateRun, fitsElapsed } from '../shared/runs.js';
 
 const KEY = 'wingrush.save.v1';
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -17,6 +18,8 @@ function freshState() {
     playSlotMs: 0,
     inventory: ITEMS.filter((i) => i.default).map((i) => i.id),
     equipped: { ...DEFAULT_LOADOUT },
+    createdAt: Date.now(),
+    lastRunAt: null,
     runs: [],
     spins: [],
     events: [],
@@ -63,13 +66,11 @@ export const mockApi = {
     return profile();
   },
 
-  async submitRun(run) {
+  async submitRun(payload) {
     await wait(150);
-    const dur = Math.max(1, run.duration);
-    if (run.coins > dur * RUN_LIMITS.maxCoinsPerSecond + RUN_LIMITS.coinBuffer ||
-        run.distance > dur * RUN_LIMITS.maxSpeed + 50) {
-      throw new Error('Run abgelehnt (unplausibel)');
-    }
+    const run = validateRun(payload);
+    const elapsed = (Date.now() - (state.lastRunAt ?? state.createdAt)) / 1000;
+    if (!run || !fitsElapsed(run.duration, elapsed)) throw new Error('Run abgelehnt (unplausibel)');
     const runId = 'run-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     const newHighscore = run.score > state.highscore;
     state.coins += run.coins;
@@ -77,7 +78,8 @@ export const mockApi = {
     state.playFlightMs += Math.round(run.duration * 1000);
     state.highscore = Math.max(state.highscore, run.score);
     state.bestDistance = Math.max(state.bestDistance, run.distance);
-    state.runs.unshift({ runId, ...run, doubled: false, at: Date.now() });
+    state.lastRunAt = Date.now();
+    state.runs.unshift({ runId, ...run, doubled: false, at: state.lastRunAt });
     state.runs = state.runs.slice(0, 30);
     persist();
     return { runId, newHighscore, profile: profile() };
