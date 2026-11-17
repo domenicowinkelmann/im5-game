@@ -4,11 +4,13 @@ import { Player } from './Player.js';
 import { Input } from './Input.js';
 import { audio } from './audio.js';
 import { api } from '../api/index.js';
-import { showRewardedAd } from '../ads/adHooks.js';
-import { COIN_TYPES, MULTIPLIER, TUNNEL_BONUS, STYLE_PER_SECOND, ACCOUNT } from '../shared/economy.js';
+import { collectContext } from '../api/context.js';
+import { showRewardedAd, showInterstitial } from '../ads/adHooks.js';
+import { COIN_TYPES, MULTIPLIER, TUNNEL_BONUS, STYLE_PER_SECOND, ACCOUNT, ADS } from '../shared/economy.js';
 
 const HORIZON = new THREE.Color('#a9cbed');
 const clamp = THREE.MathUtils.clamp;
+const ENGAGE_TIMEOUT_MS = 2500;
 
 function makeSky() {
   const geo = new THREE.SphereGeometry(1400, 32, 16);
@@ -52,6 +54,11 @@ export class Game {
 
     this.state = 'menu';
     this.leaving = false;
+    this.menuEngaged = false;
+    this.lastNewHighscore = false;
+    this.adAwaitingPlay = null;
+    this.consentPending = null;
+    this.sessionUser = null;
     this.clock = new THREE.Clock();
     this.t = 0;
     this.menuPos = new THREE.Vector3();
@@ -70,7 +77,7 @@ export class Game {
       if (this.state !== 'dead' || this.ui.current !== 'gameover' || this.ui.blocked || this.leaving) return;
       if (e.target instanceof HTMLButtonElement && e.target.id !== 'btn-retry') return;
       e.preventDefault();
-      this.startRun();
+      this.leaveGameOver('retry');
     });
   }
 
@@ -99,7 +106,28 @@ export class Game {
       this.ui.setConnection('ok');
     } catch (e) {
       this.ui.setConnection('error', e.message);
+      return;
     }
+    await this.ensureConsent();
+    this.engageMenu();
+  }
+
+  ensureConsent() {
+    if (this.consentPending) return this.consentPending;
+    this.consentPending = (async () => {
+      await this.ui.modalsClosed();
+      const consent = this.profile?.consent;
+      if (consent && !consent.decided) await this.ui.askConsent(consent);
+      this.startSession();
+    })().finally(() => { this.consentPending = null; });
+    return this.consentPending;
+  }
+
+  startSession(force = false) {
+    const p = this.profile;
+    if (!p?.consent?.stats || (!force && this.sessionUser === p.userId)) return;
+    this.sessionUser = p.userId;
+    api.startSession(collectContext());
   }
 
   applyProfile(p) {
@@ -110,10 +138,82 @@ export class Game {
   }
 
   showSessionNotice() {
-    if (!api.takeSessionNotice()?.wasGuest) return;
+    if (!api.takeSessionNotice()?.wasGuest) return false;
     const hours = ACCOUNT.guestRetentionHours;
     this.ui.showNotice(`Dein Gast-Spielstand wurde gelöscht, weil du länger als ${hours} Stunden nicht gespielt hast. ` +
       'Du startest mit einem neuen Spielstand. Registriere dich, damit dein Fortschritt gesichert bleibt.');
+    this.ensureConsent();
+    return true;
+  }
+
+  async checkSession() {
+    if (!this.showSessionNotice()) return;
+    try { this.applyProfile(await api.getMe()); } catch (e) {}
+  }
+
+  async engage(placement, facts = {}) {
+    let timer;
+    const timeout = new Promise((resolve) => { timer = setTimeout(() => resolve(null), ENGAGE_TIMEOUT_MS); });
+    const request = api.engage(placement, { hour: new Date().getHours(), newHighscore: false, newItem: false, ...facts })
+      .catch(() => null);
+    const d = await Promise.race([request, timeout]);
+    clearTimeout(timer);
+    if (d === null) request.then((late) => this.dropUnshown(late));
+    return d;
+  }
+
+  dropUnshown(d, shown = null) {
+    for (const entry of [d?.interstitial, d?.nudge]) {
+      if (entry && entry !== shown) api.engageOutcome(entry.id, 'dropped');
+    }
+  }
+
+  inMenu() {
+    return this.state === 'menu' && this.ui.current === 'menu' && !this.ui.blocked;
+  }
+
+  async engageMenu() {
+    if (this.menuEngaged || !this.inMenu()) return;
+    this.menuEngaged = true;
+    const d = await this.engage('menu');
+    const nudge = this.inMenu() ? d?.nudge : null;
+    this.dropUnshown(d, nudge);
+    if (nudge && await this.ui.showNudge(nudge) === 'clicked') this.ui.openAccount('signup');
+  }
+
+  async slotNudge() {
+    const d = await this.engage('slot_item', { newItem: true });
+    const nudge = !this.ui.blocked && this.ui.current === 'slots' ? d?.nudge : null;
+    this.dropUnshown(d, nudge);
+    return !!nudge && await this.ui.showNudge(nudge) === 'clicked';
+  }
+
+  async leaveGameOver(next) {
+    if (this.leaving || this.state !== 'dead' || this.ui.blocked) return;
+    this.leaving = true;
+    let signup = false;
+    try {
+      const d = await this.engage('gameover', { newHighscore: this.lastNewHighscore });
+      const shown = d?.interstitial ?? d?.nudge ?? null;
+      this.dropUnshown(d, shown);
+      if (d?.interstitial) {
+        await showInterstitial(this.ui, d.interstitial);
+        this.adAwaitingPlay = { id: d.interstitial.id, until: performance.now() + ADS.interstitial.continueSeconds * 1000 };
+      } else if (d?.nudge) {
+        signup = await this.ui.showNudge(d.nudge) === 'clicked';
+      }
+    } finally {
+      this.leaving = false;
+    }
+    if (signup) {
+      this.toMenu();
+      this.ui.openAccount('signup');
+    } else if (next === 'retry') {
+      this.startRun();
+    } else {
+      this.toMenu();
+      if (next === 'slots') this.ui.openSlots();
+    }
   }
 
   startRun() {
@@ -127,13 +227,16 @@ export class Game {
       mult: 1, maxMult: 1, nearTime: 0, farTime: 0,
       coinsByType: { bronze: 0, silver: 0, gold: 0, diamond: 0 },
       cause: '',
+      afterAd: this.adAwaitingPlay && performance.now() <= this.adAwaitingPlay.until ? this.adAwaitingPlay.id : null,
     };
+    this.adAwaitingPlay = null;
     this.lastRunId = null;
+    this.lastNewHighscore = false;
     this.state = 'playing';
     this.ui.showScreen('hud');
     this.ui.showHint();
     this.snapCamera();
-    api.trackEvent('run_start', { runs: this.profile?.totalRuns ?? 0 });
+    api.trackEvent('run_start');
   }
 
   score() {
@@ -169,16 +272,21 @@ export class Game {
     };
     let res = null, error = null;
     try { res = await api.submitRun(payload); } catch (e) { error = e.message; }
-    if (res) { this.lastRunId = res.runId; this.applyProfile(res.profile); }
-    api.trackEvent('run_end', { ...payload, accepted: !!res, newHighscore: !!res?.newHighscore });
-    if (res?.newHighscore) api.trackEvent('new_highscore', { score: payload.score });
+    if (res) {
+      this.lastRunId = res.runId;
+      this.lastNewHighscore = !!res.newHighscore;
+      this.applyProfile(res.profile);
+    }
+    if (r.afterAd) api.engageOutcome(r.afterAd, 'continued');
+    await this.checkSession();
+    api.trackEvent('run_end', { accepted: !!res, duration: payload.duration, distance: payload.distance, cause: payload.cause });
     this.state = 'dead';
     this.ui.showGameOver(payload, res, error);
   }
 
   async doubleCoins() {
     const runId = this.lastRunId;
-    if (!runId) return;
+    if (!runId || this.leaving) return;
     api.trackEvent('rewarded_ad_start', { placement: 'double_coins' });
     const watched = await showRewardedAd(this.ui);
     if (!watched) return;
@@ -188,6 +296,7 @@ export class Game {
       this.ui.markDoubled(res.profile);
       api.trackEvent('rewarded_ad_complete', { placement: 'double_coins' });
     } catch (e) { this.ui.doubleFailed(e.message); }
+    await this.checkSession();
   }
 
   toMenu() {

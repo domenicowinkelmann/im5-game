@@ -1,14 +1,12 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { startServer } from './helpers.js';
+import { startServer, PROFILE_KEYS } from './helpers.js';
 import { START_COINS, SPIN_COST, DOUBLE, RUN_LIMITS, PLAYTIME } from '../../src/shared/economy.js';
 import { DEFAULT_LOADOUT, ITEMS } from '../../src/shared/items.js';
 
 let app;
 before(async () => { app = await startServer(); });
 after(async () => { await app.stop(); });
-
-const PROFILE_KEYS = ['bestDistance', 'coins', 'equipped', 'highscore', 'inventory', 'playTime', 'totalRuns', 'userId', 'username'];
 
 const RUN = {
   distance: 1200, score: 1900, coins: 30, duration: 40, maxMultiplier: 2, tunnels: 1,
@@ -40,6 +38,7 @@ test('guest gets a profile shaped like the mock', async () => {
   assert.deepEqual(profile.inventory, ITEMS.filter((i) => i.default).map((i) => i.id));
   assert.deepEqual(profile.equipped, DEFAULT_LOADOUT);
   assert.deepEqual(profile.playTime, { flight: 0, slots: 0, total: 0 });
+  assert.deepEqual(profile.consent, { decided: false, stats: false, personal: false, adult: false });
   const me = await app.call('GET', '/me', { token });
   assert.deepEqual(me.body, profile);
   const [row] = await app.pool.query('SELECT registered_at, session_no FROM users WHERE id = ?', [Number(profile.userId)]);
@@ -267,9 +266,10 @@ test('equip only owned items', async () => {
 
 test('events are validated and stored', async () => {
   const g = await guest();
+  assert.equal((await app.consent(g.token, { stats: true })).status, 200);
   assert.deepEqual(await app.call('POST', '/events', { token: g.token, body: { name: 'run_start', data: { runs: 0 } } }), { status: 200, body: { ok: true } });
   assert.equal((await app.call('POST', '/events', { token: g.token, body: { name: 'run_start' } })).status, 200);
-  for (const body of [{ name: 'Böse' }, { name: 'x'.repeat(41) }, { name: 'ok', data: [1] }, { name: 'ok', data: 'str' }, { name: 'ok', data: { s: 'x'.repeat(2100) } }]) {
+  for (const body of [{ name: 'Böse' }, { name: 'x'.repeat(41) }, { name: 'ok' }, { name: 'run_end', data: [1] }, { name: 'run_end', data: 'str' }, { name: 'run_end', data: { cause: 'x'.repeat(2100) } }]) {
     assert.equal((await app.call('POST', '/events', { token: g.token, body })).status, 400, JSON.stringify(body).slice(0, 40));
   }
   const [{ n }] = await app.pool.query('SELECT COUNT(*) AS n FROM events WHERE user_id = ?', [Number(g.profile.userId)]);

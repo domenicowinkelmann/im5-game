@@ -1,4 +1,5 @@
 import { ITEMS, DEFAULT_LOADOUT, getItem } from '../../src/shared/items.js';
+import { PRIVACY } from '../../src/shared/economy.js';
 import { ApiError, MSG } from './errors.js';
 
 const DEFAULT_ITEMS = ITEMS.filter((i) => i.default).map((i) => i.id);
@@ -21,7 +22,8 @@ export async function ownedItems(conn, userId) {
 
 export async function loadProfile(conn, userId) {
   const [user] = await conn.query(
-    `SELECT id, username, coins, highscore, best_distance, total_runs, play_flight_ms, play_slot_ms
+    `SELECT id, username, coins, highscore, best_distance, total_runs, play_flight_ms, play_slot_ms,
+       consent_version, consent_stats, consent_personal, age_16plus
      FROM users WHERE id = ?`,
     [userId],
   );
@@ -42,5 +44,11 @@ export async function loadProfile(conn, userId) {
     playTime: playTime(user.play_flight_ms, user.play_slot_ms),
     inventory,
     equipped,
+    consent: {
+      decided: user.consent_version === PRIVACY.version,
+      stats: user.consent_stats === 1,
+      personal: user.consent_personal === 1,
+      adult: user.age_16plus === 1,
+    },
   };
 }

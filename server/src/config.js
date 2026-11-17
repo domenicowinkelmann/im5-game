@@ -1,6 +1,8 @@
 import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 
 const ENV_FILE = fileURLToPath(new URL('../.env', import.meta.url));
+const SERVER_DIR = fileURLToPath(new URL('..', import.meta.url));
 
 try { process.loadEnvFile(ENV_FILE); } catch {}
 
@@ -8,6 +10,11 @@ function required(env, name) {
   const value = env[name];
   if (value === undefined || value === '') throw new Error(`Missing env var ${name}`);
   return value;
+}
+
+export function geoipPath(env = process.env) {
+  const file = (env.GEOIP_DB || '').trim();
+  return file ? resolve(SERVER_DIR, file) : null;
 }
 
 export function loadConfig(env = process.env) {
@@ -20,7 +27,9 @@ export function loadConfig(env = process.env) {
     trustProxy: Number(env.TRUST_PROXY) || false,
     corsOrigins: (env.CORS_ORIGIN || '').split(',').map((s) => s.trim()).filter(Boolean),
     sessionDays: 90,
-    jobs: { intervalMinutes: 15, cleanupBatch: 100 },
+    adminSessionHours: 8,
+    jobs: { intervalMinutes: 15, cleanupBatch: 100, purgeHours: 24, purgeBatch: 5000, profileBatch: 200, profileMaxAgeHours: 24 },
+    geoipDb: geoipPath(env),
     db: {
       host: env.DB_HOST || '127.0.0.1',
       port: Number(env.DB_PORT) || 3306,

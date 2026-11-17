@@ -5,3 +5,6 @@ dist-single/
 .env
 .env.*
 !.env.example
+/geoip/
+*.mmdb
+*.mmdb.part

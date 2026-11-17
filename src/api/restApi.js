@@ -1,4 +1,4 @@
-const BASE = import.meta.env.VITE_API_URL || '/api';
+const BASE = import.meta.env?.VITE_API_URL || '/api';
 const TOKEN_KEY = 'wingrush.token';
 const GUEST_KEY = 'wingrush.guest';
 
@@ -86,6 +86,12 @@ function withNewToken(res) {
   return { profile: res.profile };
 }
 
+function sessionExpired() {
+  const err = new Error('Sitzung abgelaufen. Melde dich erneut an, um dein Konto zu löschen.');
+  err.status = 401;
+  return err;
+}
+
 function takeSessionNotice() {
   const n = notice;
   notice = null;
@@ -99,12 +105,35 @@ export const restApi = {
   spin: () => call('POST', '/spin', {}),
   equip: (itemId) => call('POST', '/equip', { itemId }),
   trackEvent: (name, data) => call('POST', '/events', { name, data }).catch(() => {}),
+  startSession: (context) => call('POST', '/session', context).catch(() => {}),
+  setConsent: ({ stats, personal, adult }) => call('POST', '/consent', { stats, personal, adult }),
+  engage: (placement, facts) => call('POST', '/engage', { placement, facts }),
+  engageOutcome: (id, outcome) => call('POST', `/engage/${encodeURIComponent(id)}`, { outcome }).catch(() => {}),
   signup: (username, password) => call('POST', '/auth/signup', { username, password }).then(withNewToken),
   login: (username, password) => request('POST', '/auth/login', { username, password }, readToken()).then(withNewToken),
   async logout() {
     const token = readToken();
     if (token) await request('POST', '/auth/logout', {}, token).catch(() => {});
     if (readToken() === token) writeToken(null);
+    return { profile: await call('GET', '/me') };
+  },
+  async deleteAccount(password) {
+    const token = readToken();
+    const guest = !!token && readGuest();
+    try {
+      if (!token) throw sessionExpired();
+      await request('POST', '/account/delete', password ? { password } : {}, token);
+    } catch (e) {
+      if (e.status !== 401) throw e;
+      if (!guest) {
+        if (readToken() === token) writeToken(null);
+        throw sessionExpired();
+      }
+    }
+    if (readToken() === token) {
+      writeToken(null);
+      writeGuest(false);
+    }
     return { profile: await call('GET', '/me') };
   },
   takeSessionNotice,

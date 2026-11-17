@@ -2,6 +2,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { startServer } from './helpers.js';
 import { cleanupGuests, cleanupSessions, cleanup } from '../src/cleanup.js';
+import { SEED_MARKER } from '../src/analytics/archive.js';
 import { startJobs } from '../src/jobs.js';
 import { migrate } from '../src/migrate.js';
 import { PLAYTIME } from '../../src/shared/economy.js';
@@ -139,6 +140,26 @@ test('guests are removed in batches until none is left', async () => {
   assert.equal(await archiveCount(), before + ids.length);
   const [{ n }] = await app.pool.query('SELECT COUNT(*) AS n FROM player_archive_days WHERE archive_id > ?', [last]);
   assert.equal(n, 0);
+});
+
+test('demo guests keep the seed marker when the cleanup archives them', async () => {
+  const { token, uid } = await guest();
+  await app.pool.query('UPDATE users SET created_at = NOW(3) - INTERVAL 2 DAY WHERE id = ?', [uid]);
+  assert.equal((await app.call('POST', '/runs', { token, body: RUN })).status, 200);
+  await app.pool.query('UPDATE users SET password_hash = ? WHERE id = ?', [SEED_MARKER, uid]);
+  const real = await guest();
+  await setSeen(uid, 25);
+  await setSeen(real.uid, 25);
+  const [{ last }] = await app.pool.query('SELECT COALESCE(MAX(id), 0) AS last FROM player_archive');
+  assert.equal(await cleanupGuests(app.pool), 2);
+  assert.equal(await exists(uid), false);
+  const rows = await app.pool.query('SELECT id, reason, runs FROM player_archive WHERE id > ? ORDER BY id', [last]);
+  assert.deepEqual(rows.map(({ reason, runs }) => ({ reason, runs })), [{ reason: 'seed', runs: 1 }, { reason: 'expired', runs: 0 }]);
+  const [{ n }] = await app.pool.query('SELECT COUNT(*) AS n FROM player_archive_days WHERE archive_id = ?', [rows[0].id]);
+  assert.equal(n, 1);
+  await app.pool.query("DELETE FROM player_archive WHERE reason = 'seed'");
+  const [{ remaining }] = await app.pool.query('SELECT COUNT(*) AS remaining FROM player_archive_days WHERE archive_id = ?', [rows[0].id]);
+  assert.equal(remaining, 0);
 });
 
 test('expired login sessions are deleted', async () => {

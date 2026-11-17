@@ -1,7 +1,8 @@
 import { ITEMS, getItem, itemsByCategory, CATEGORIES } from '../shared/items.js';
-import { RARITIES, RARITY_ORDER, SPIN_COST, ALL_SYMBOLS, START_COINS, ACCOUNT, SLOT } from '../shared/economy.js';
+import { RARITIES, RARITY_ORDER, SPIN_COST, ALL_SYMBOLS, START_COINS, ACCOUNT, SLOT, PRIVACY } from '../shared/economy.js';
 import { api } from '../api/index.js';
 import { audio } from '../game/audio.js';
+import { privacyHtml } from './privacy.js';
 
 const $ = (id) => document.getElementById(id);
 const SCREENS = ['menu', 'hud', 'gameover', 'slots', 'garage', 'account'];
@@ -19,6 +20,14 @@ const AD_TEXT = {
   rewarded: { title: 'Werbung läuft …', note: 'Platzhalter – hier kommt später das Rewarded Ad' },
   interstitial: { title: 'Kurze Werbepause …', note: 'Platzhalter – hier kommt später das Interstitial Ad' },
 };
+const NUDGE_TEXT = {
+  item: 'Glückwunsch zum neuen Item!',
+  highscore: 'Neuer Highscore, stark geflogen!',
+  return: 'Schön, dass du wieder da bist!',
+  progress: 'Du hast schon einiges erspielt.',
+};
+const nudgeText = (reason) => `${NUDGE_TEXT[reason] ?? NUDGE_TEXT.progress} Als Gast wird dein Spielstand mit Münzen und Items ` +
+  `nach ${ACCOUNT.guestRetentionHours} Stunden ohne Spiel gelöscht. Registriere dich, um ihn zu sichern.`;
 
 export function swatch(item, big = false) {
   let bg;
@@ -39,6 +48,11 @@ export class UI {
     this.accountMode = 'signup';
     this.accountBusy = false;
     this.modals = [];
+    this.idleWaiters = [];
+    this.consentDone = null;
+    this.consentBusy = false;
+    this.deleteBusy = false;
+    this.nudgeDone = null;
     this.el = {
       vignette: $('vignette'), flash: $('flash'), popups: $('popups'), banner: $('banner'),
       dist: $('hud-dist'), coins: $('hud-coins'), score: $('hud-score'), speed: $('hud-speed'),
@@ -47,6 +61,11 @@ export class UI {
     $('spin-cost').textContent = SPIN_COST;
     $('account-guest-note').textContent =
       `Als Gast wird dein Spielstand nach ${ACCOUNT.guestRetentionHours} Stunden ohne Spiel gelöscht. Registriere dich, um ihn zu sichern.`;
+    const age = PRIVACY.personalMinAge;
+    $('consent-adult-label').textContent = `Ich bin ${age} Jahre oder älter`;
+    $('consent-personal-desc').textContent =
+      `Werbepausen und Hinweise passend zu deinem Spielverhalten. Nur mit Statistik und ab ${age} Jahren.`;
+    $('privacy-text').innerHTML = privacyHtml();
     this.reelsMoving = false;
     this.reelState = [0, 1, 2].map(() => [randomSymbol(), randomSymbol(), randomSymbol()]);
     this.buildMachine();
@@ -55,10 +74,10 @@ export class UI {
   bind(game) {
     this.game = game;
     $('btn-play').onclick = () => game.startRun();
-    $('btn-retry').onclick = () => game.startRun();
-    $('btn-menu').onclick = () => game.toMenu();
+    $('btn-retry').onclick = () => game.leaveGameOver('retry');
+    $('btn-menu').onclick = () => game.leaveGameOver('menu');
     $('btn-slots').onclick = () => this.openSlots();
-    $('btn-go-slots').onclick = () => { game.toMenu(); this.openSlots(); };
+    $('btn-go-slots').onclick = () => game.leaveGameOver('slots');
     $('btn-garage').onclick = () => this.openGarage();
     $('btn-spin').onclick = () => this.spin();
     $('lever').onclick = () => this.spin();
@@ -78,9 +97,23 @@ export class UI {
     $('btn-double').onclick = () => { $('btn-double').disabled = true; game.doubleCoins(); };
     $('btn-account').onclick = () => this.openAccount();
     $('btn-notice-ok').onclick = () => this.closeNotice();
+    $('btn-nudge-save').onclick = () => this.nudgeDone?.('clicked');
+    $('btn-nudge-later').onclick = () => this.nudgeDone?.('dismissed');
     $('btn-reconnect').onclick = () => game.loadProfile();
     $('btn-logout').onclick = () => this.logout();
     $('account-form').onsubmit = (e) => { e.preventDefault(); this.submitAccount(); };
+    $('btn-privacy').onclick = () => this.showPrivacy();
+    $('btn-consent-privacy').onclick = () => this.showPrivacy();
+    $('btn-privacy-close').onclick = () => this.closePrivacy();
+    $('consent-stats').onchange = () => this.syncConsentSwitches();
+    $('consent-adult').onchange = () => this.syncConsentSwitches();
+    $('btn-consent-reject').onclick = () => this.saveConsent({ stats: false, personal: false });
+    $('btn-consent-save').onclick = () => this.saveConsent({ stats: $('consent-stats').checked, personal: $('consent-personal').checked });
+    $('btn-consent-all').onclick = () => this.saveConsent({ stats: true, personal: true });
+    $('btn-consent-edit').onclick = () => this.askConsent(this.profile?.consent);
+    $('btn-delete-open').onclick = () => this.openDelete();
+    $('btn-delete-cancel').onclick = () => this.closeDelete();
+    $('delete-form').onsubmit = (e) => { e.preventDefault(); this.deleteAccount(); };
     document.querySelectorAll('[data-back]').forEach((b) => { b.onclick = () => this.showScreen('menu'); });
     document.querySelectorAll('#garage .tab').forEach((t) => {
       t.onclick = () => {
@@ -99,7 +132,10 @@ export class UI {
   showScreen(name) {
     for (const s of SCREENS) $(s).classList.toggle('hidden', s !== name);
     this.current = name;
-    if (name !== 'hud') this.setVignette(0);
+    if (name !== 'hud') {
+      this.setVignette(0);
+      api.trackEvent('screen_view', { screen: name });
+    }
   }
 
   setConnection(state, message = '') {
@@ -211,21 +247,100 @@ export class UI {
     (this.focusables(el)[0] || el).focus({ preventScroll: true });
   }
 
-  pushModal(element, { dismissable = false, onDismiss = null } = {}) {
+  pushModal(element, { dismissable = false, onDismiss = null, focusDialog = false } = {}) {
     this.modals.push({ element, dismissable, onDismiss, restore: document.activeElement });
+    element.style.zIndex = String(10 + this.modals.length);
     if (!element.hasAttribute('tabindex')) element.tabIndex = -1;
     element.classList.remove('hidden');
-    this.focusModal(element);
+    if (focusDialog) element.focus({ preventScroll: true });
+    else this.focusModal(element);
   }
 
   popModal() {
     const top = this.modals.pop();
     if (!top) return;
     top.element.classList.add('hidden');
+    top.element.style.zIndex = '';
     if (top.restore instanceof HTMLElement) top.restore.focus({ preventScroll: true });
     const next = this.modals.at(-1);
     if (next && !next.element.contains(document.activeElement)) this.focusModal(next.element);
     else if (top.element.contains(document.activeElement)) document.activeElement.blur();
+    if (!this.modals.length) this.idleWaiters.splice(0).forEach((resolve) => resolve());
+  }
+
+  closeModal(element) {
+    if (this.modals.at(-1)?.element === element) return this.popModal();
+    const i = this.modals.findIndex((m) => m.element === element);
+    if (i < 0) return;
+    this.modals.splice(i, 1);
+    element.classList.add('hidden');
+    element.style.zIndex = '';
+  }
+
+  modalsClosed() {
+    if (!this.modals.length) return Promise.resolve();
+    return new Promise((resolve) => this.idleWaiters.push(resolve));
+  }
+
+  isOpen(id) {
+    return this.modals.some((m) => m.element === $(id));
+  }
+
+  showPrivacy() {
+    if (this.isOpen('privacy')) return;
+    $('privacy-text').scrollTop = 0;
+    this.pushModal($('privacy'), { dismissable: true });
+  }
+
+  closePrivacy() {
+    if (this.modals.at(-1)?.element === $('privacy')) this.popModal();
+  }
+
+  syncConsentSwitches() {
+    const allowed = $('consent-stats').checked && $('consent-adult').checked;
+    const personal = $('consent-personal');
+    personal.disabled = !allowed;
+    if (!allowed) personal.checked = false;
+  }
+
+  askConsent(current) {
+    if (this.consentDone) return this.consentDone.promise;
+    const c = current?.decided ? current : { stats: false, personal: false, adult: current?.adult ?? false };
+    $('consent-stats').checked = !!c.stats;
+    $('consent-adult').checked = !!c.adult;
+    $('consent-personal').checked = !!c.personal;
+    $('consent-error').textContent = '';
+    this.syncConsentSwitches();
+    let resolve;
+    const promise = new Promise((r) => { resolve = r; });
+    this.consentDone = { promise, resolve };
+    this.pushModal($('consent'));
+    return promise;
+  }
+
+  async saveConsent({ stats, personal }) {
+    if (this.consentBusy || !this.consentDone) return;
+    const adult = $('consent-adult').checked;
+    const buttons = ['btn-consent-reject', 'btn-consent-save', 'btn-consent-all'].map($);
+    this.consentBusy = true;
+    buttons.forEach((b) => { b.disabled = true; });
+    $('consent-error').textContent = '';
+    try {
+      const res = await api.setConsent({ stats, personal: personal && stats && adult, adult });
+      this.closeModal($('consent'));
+      const done = this.consentDone;
+      this.consentDone = null;
+      const granted = !this.profile?.consent?.stats && res.profile.consent.stats;
+      this.game.applyProfile(res.profile);
+      if (granted) this.game.startSession(true);
+      if (this.current === 'account') this.renderAccount();
+      done.resolve(res.profile.consent);
+    } catch (e) {
+      $('consent-error').textContent = e.message;
+    } finally {
+      this.consentBusy = false;
+      buttons.forEach((b) => { b.disabled = false; });
+    }
   }
 
   modalKey(e) {
@@ -255,6 +370,26 @@ export class UI {
 
   closeNotice() {
     if (this.modals.at(-1)?.element === $('notice')) this.popModal();
+  }
+
+  showNudge(d) {
+    const el = $('nudge');
+    if (this.nudgeDone) {
+      api.engageOutcome(d.id, 'dropped');
+      return Promise.resolve('dropped');
+    }
+    $('nudge-text').textContent = nudgeText(d.reason);
+    return new Promise((resolve) => {
+      const finish = (outcome) => {
+        if (this.nudgeDone !== finish) return;
+        this.nudgeDone = null;
+        this.closeModal(el);
+        api.engageOutcome(d.id, outcome);
+        resolve(outcome);
+      };
+      this.nudgeDone = finish;
+      this.pushModal(el, { dismissable: true, focusDialog: true, onDismiss: () => finish('dismissed') });
+    });
   }
 
   fakeAd(seconds, kind = 'rewarded') {
@@ -427,8 +562,10 @@ export class UI {
     machine.classList.remove('spinning', 'tense');
     reelEls[2].classList.remove('tense');
     await this.showSlotResult(res, startCoins - SPIN_COST, reelEls);
+    const signup = res.result.kind === 'item' && !res.result.duplicate && await this.game.slotNudge();
     this.spinning = false;
     this.setProfile(this.profile);
+    if (signup) this.openAccount('signup');
   }
 
   flashBanner(text, cls = '', color = '') {
@@ -579,7 +716,8 @@ export class UI {
     grid.querySelectorAll('.item:not(.locked)').forEach((b) => { b.onclick = () => this.equip(b.dataset.id); });
   }
 
-  openAccount() {
+  openAccount(mode) {
+    if (mode) this.accountMode = mode;
     this.showScreen('account');
     this.renderAccount();
   }
@@ -595,7 +733,80 @@ export class UI {
     $('account-guest').classList.toggle('hidden', !!name);
     $('account-user').classList.toggle('hidden', !name);
     $('account-name').textContent = name || '';
+    this.renderConsentState();
+    this.closeDelete();
     this.setAccountMode(this.accountMode);
+  }
+
+  renderConsentState() {
+    const c = this.profile?.consent;
+    const onOff = (v) => (v ? 'an' : 'aus');
+    $('account-consent-state').textContent = c?.decided
+      ? `Statistik: ${onOff(c.stats)} · Personalisierte Angebote: ${onOff(c.personal)}`
+      : 'Noch keine Auswahl getroffen.';
+  }
+
+  openDelete() {
+    const registered = !!this.profile?.username;
+    $('delete-text').textContent = registered
+      ? 'Dein Konto, dein Spielstand, deine Münzen und Items werden endgültig gelöscht. Gib zur Bestätigung dein Passwort ein.'
+      : 'Dein Gast-Spielstand mit Münzen und Items wird endgültig gelöscht. Danach startest du neu.';
+    $('delete-password-label').classList.toggle('hidden', !registered);
+    $('delete-password').value = '';
+    $('delete-error').textContent = '';
+    $('btn-delete-open').classList.add('hidden');
+    $('delete-form').classList.remove('hidden');
+    (registered ? $('delete-password') : $('btn-delete-cancel')).focus({ preventScroll: true });
+  }
+
+  closeDelete() {
+    $('delete-form').classList.add('hidden');
+    $('btn-delete-open').classList.remove('hidden');
+    $('delete-password').value = '';
+    $('delete-error').textContent = '';
+  }
+
+  async deleteAccount() {
+    if (this.deleteBusy) return;
+    const registered = !!this.profile?.username;
+    const password = $('delete-password').value;
+    if (registered && !password) {
+      $('delete-error').textContent = 'Passwort falsch';
+      return;
+    }
+    this.deleteBusy = true;
+    $('btn-delete-confirm').disabled = true;
+    try {
+      const res = await api.deleteAccount(registered ? password : undefined);
+      this.game.applyProfile(res.profile);
+      $('account-username').value = '';
+      this.accountMode = 'signup';
+      this.renderAccount();
+      this.showNotice('Dein Konto und deine Daten wurden gelöscht. Du spielst jetzt mit einem neuen Gast-Spielstand.');
+      this.game.ensureConsent();
+    } catch (e) {
+      if (e.status === 401) await this.sessionLost(e.message);
+      else $('delete-error').textContent = e.message;
+    } finally {
+      this.deleteBusy = false;
+      $('btn-delete-confirm').disabled = false;
+    }
+  }
+
+  async sessionLost(message) {
+    const name = this.profile?.username || '';
+    try {
+      this.game.applyProfile(await api.getMe());
+    } catch (e) {
+      $('delete-error').textContent = e.message;
+      return;
+    }
+    $('account-username').value = name;
+    $('account-password').value = '';
+    this.accountMode = 'login';
+    this.renderAccount();
+    $('account-error').textContent = message;
+    this.game.ensureConsent();
   }
 
   setAccountMode(mode) {
@@ -630,6 +841,7 @@ export class UI {
       $('account-password').value = '';
       this.game.applyProfile(res.profile);
       this.renderAccount();
+      if (login) this.game.ensureConsent();
     } catch (e) {
       error.textContent = e.message;
     } finally {
@@ -647,6 +859,7 @@ export class UI {
       $('account-username').value = '';
       this.accountMode = 'login';
       this.renderAccount();
+      this.game.ensureConsent();
     } catch (e) {
       this.setConnection('error', e.message);
       this.showScreen('menu');

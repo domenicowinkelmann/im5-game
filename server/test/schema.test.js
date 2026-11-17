@@ -20,6 +20,20 @@ test('migrate can run twice on an existing schema', async () => {
   assert.ok((await columns('runs')).some((c) => c.name === 'session_no'));
 });
 
+test('migrate removes events stored without consent or before the consent', async () => {
+  const user = (stats, at) => app.pool.query(
+    `INSERT INTO users (coins, consent_stats, consent_stats_at) VALUES (0, ?, ${at})`, [stats]);
+  const { insertId: none } = await user(0, 'NULL');
+  const { insertId: later } = await user(1, 'NOW(3) - INTERVAL 1 HOUR');
+  const event = (uid, at) => app.pool.query(`INSERT INTO events (user_id, name, created_at) VALUES (?, 'run_start', ${at})`, [uid]);
+  await event(none, 'NOW(3)');
+  await event(later, 'NOW(3) - INTERVAL 2 HOUR');
+  await event(later, 'NOW(3)');
+  await migrate(app.config.db);
+  const rows = await app.pool.query('SELECT user_id FROM events WHERE user_id IN (?, ?)', [none, later]);
+  assert.deepEqual(rows.map((r) => Number(r.user_id)), [Number(later)]);
+});
+
 test('no column stores an ip address or a user agent', async () => {
   const rows = await app.pool.query(
     `SELECT TABLE_NAME AS t, COLUMN_NAME AS c FROM information_schema.COLUMNS

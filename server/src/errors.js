@@ -28,4 +28,7 @@ export const MSG = {
   notOwned: 'Item nicht im Besitz',
   badEvent: 'Ungültiges Ereignis',
   dbDown: 'Datenbank nicht erreichbar',
+  forbidden: 'Kein Zugriff',
+  badPassword: 'Passwort falsch',
+  noConsent: 'Keine Statistik-Einwilligung',
 };

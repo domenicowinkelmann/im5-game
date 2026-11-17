@@ -34,11 +34,11 @@ export function readToken(req) {
   return match ? match[1] : null;
 }
 
-export async function createSession(conn, userId, days) {
+export async function createSession(conn, userId, { hours, admin = false }) {
   const token = randomBytes(32).toString('base64url');
   await conn.query(
-    'INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, NOW(3) + INTERVAL ? DAY)',
-    [hashToken(token), userId, days],
+    'INSERT INTO sessions (token_hash, user_id, admin, expires_at) VALUES (?, ?, ?, NOW(3) + INTERVAL ? HOUR)',
+    [hashToken(token), userId, admin ? 1 : 0, hours],
   );
   return token;
 }
@@ -49,7 +49,7 @@ export function authenticate(pool, config, { optional = false, touch = true } = 
     const tokenHash = token && hashToken(token);
     const rows = tokenHash ? await pool.query(
       `SELECT s.user_id, u.username, TIMESTAMPDIFF(SECOND, s.refreshed_at, NOW(3)) AS age,
-         TIMESTAMPDIFF(SECOND, u.last_seen_at, NOW(3)) AS idle
+         TIMESTAMPDIFF(SECOND, u.last_seen_at, NOW(3)) AS idle, u.consent_stats, u.is_admin, s.admin
        FROM sessions s JOIN users u ON u.id = s.user_id
        WHERE s.token_hash = ? AND s.expires_at > NOW(3)`,
       [tokenHash],
@@ -59,15 +59,16 @@ export function authenticate(pool, config, { optional = false, touch = true } = 
       throw new ApiError(401, MSG.unauthorized);
     }
     const session = rows[0];
-    if (session.age > REFRESH_SECONDS) {
+    if (session.age > REFRESH_SECONDS && session.admin !== 1) {
       await pool.query(
         'UPDATE sessions SET refreshed_at = NOW(3), expires_at = NOW(3) + INTERVAL ? DAY WHERE token_hash = ?',
         [config.sessionDays, tokenHash],
       );
     }
-    if (touch) await touchActivity(pool, session.user_id, session.idle);
-    req.user = { id: session.user_id, username: session.username };
+    if (touch) await touchActivity(pool, session.user_id, { idle: session.idle, stats: session.consent_stats === 1 });
+    req.user = { id: session.user_id, username: session.username, admin: session.is_admin === 1 };
     req.tokenHash = tokenHash;
+    req.adminSession = session.admin === 1;
     next();
   };
 }

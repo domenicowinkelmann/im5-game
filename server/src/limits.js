@@ -21,5 +21,7 @@ export function createLimiters(config) {
     loginName: make(15, 10, (req) => `name:${String(req.body?.username ?? '').trim().toLowerCase()}`),
     play: make(1, 60, byUser('play')),
     events: make(1, 120, byUser('events')),
+    admin: make(1, 120, byUser('admin')),
+    accountDelete: make(15, 10, byUser('delete')),
   };
 }

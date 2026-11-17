@@ -19,7 +19,7 @@ export function authRoutes({ pool, config, limits, auth, optionalAuth }) {
   r.post('/guest', limits.guest, async (req, res) => {
     res.json(await tx(pool, async (conn) => {
       const { insertId } = await conn.query('INSERT INTO users (coins) VALUES (?)', [START_COINS]);
-      const token = await createSession(conn, insertId, config.sessionDays);
+      const token = await createSession(conn, insertId, { hours: config.sessionDays * 24 });
       return { token, profile: await loadProfile(conn, insertId) };
     }));
   });
@@ -40,7 +40,7 @@ export function authRoutes({ pool, config, limits, auth, optionalAuth }) {
         );
         if (result.affectedRows !== 1) throw new ApiError(409, MSG.alreadyRegistered);
         await conn.query('DELETE FROM sessions WHERE user_id = ?', [req.user.id]);
-        const token = await createSession(conn, req.user.id, config.sessionDays);
+        const token = await createSession(conn, req.user.id, { hours: config.sessionDays * 24 });
         return { token, profile: await loadProfile(conn, req.user.id) };
       }));
     } catch (e) {
@@ -65,7 +65,7 @@ export function authRoutes({ pool, config, limits, auth, optionalAuth }) {
       } else if (req.user) {
         await conn.query('DELETE FROM sessions WHERE token_hash = ?', [req.tokenHash]);
       }
-      const token = await createSession(conn, user.id, config.sessionDays);
+      const token = await createSession(conn, user.id, { hours: config.sessionDays * 24 });
       return { token, profile: await loadProfile(conn, user.id) };
     }));
   });

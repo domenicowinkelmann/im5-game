@@ -3,6 +3,7 @@ import { createPool } from './db.js';
 import { createApp } from './app.js';
 import { startJobs } from './jobs.js';
 import { migrate } from './migrate.js';
+import { openGeo } from './geo.js';
 
 const config = loadConfig();
 
@@ -15,7 +16,9 @@ try {
 }
 
 const pool = createPool(config.db);
-const app = createApp({ pool, config });
+const geo = await openGeo(config.geoipDb);
+if (!config.geoipDb) console.log('GEOIP_DB not set, location disabled');
+const app = createApp({ pool, config, geo });
 
 const server = app.listen(config.port, (err) => {
   if (err) {
