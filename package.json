@@ -15,9 +15,18 @@
     "build:deploy": "npm ci --include=dev && npm run build && npm --prefix server ci --omit=dev",
     "start": "node server/src/index.js",
     "db:init": "npm --prefix server run db:init",
-    "db:check": "npm --prefix server run db:check"
+    "db:check": "npm --prefix server run db:check",
+    "db:local:setup": "npm --prefix server run db:local:setup",
+    "db:local:start": "npm --prefix server run db:local:start",
+    "db:local:stop": "npm --prefix server run db:local:stop",
+    "db:local:status": "npm --prefix server run db:local:status",
+    "geo:update": "npm --prefix server run geo:update --",
+    "db:seed-demo": "npm --prefix server run db:seed-demo --",
+    "admin:grant": "npm --prefix server run admin:grant --"
   },
   "dependencies": {
+    "@fontsource/lilita-one": "^5.3.0",
+    "@fontsource/rubik": "^5.3.0",
     "three": "^0.186.1"
   },
   "devDependencies": {

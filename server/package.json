@@ -12,11 +12,19 @@
     "dev": "node --watch src/index.js",
     "db:init": "node scripts/db-init.js",
     "db:check": "node scripts/db-check.js",
-    "test": "NODE_ENV=test node --test --test-concurrency=1 test/*.test.js"
+    "db:local:setup": "node scripts/local-db.js setup",
+    "db:local:start": "node scripts/local-db.js start",
+    "db:local:stop": "node scripts/local-db.js stop",
+    "db:local:status": "node scripts/local-db.js status",
+    "geo:update": "node scripts/geo-update.js",
+    "db:seed-demo": "node scripts/seed-demo.js",
+    "admin:grant": "node scripts/admin-grant.js",
+    "test": "node --test --test-concurrency=1"
   },
   "dependencies": {
     "express": "^5.3.0",
     "express-rate-limit": "^8.7.1",
-    "mariadb": "^3.5.4"
+    "mariadb": "^3.5.4",
+    "maxmind": "^5.0.8"
   }
 }

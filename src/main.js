@@ -1,3 +1,7 @@
+import '@fontsource/lilita-one/400.css';
+import '@fontsource/rubik/400.css';
+import '@fontsource/rubik/600.css';
+import '@fontsource/rubik/800.css';
 import './style.css';
 import { Game } from './game/Game.js';
 import { UI } from './ui/ui.js';

@@ -6,6 +6,11 @@ import { authenticate } from './auth.js';
 import { createLimiters } from './limits.js';
 import { authRoutes } from './routes/auth.js';
 import { gameRoutes } from './routes/game.js';
+import { privacyRoutes } from './routes/privacy.js';
+import { sessionRoutes } from './routes/session.js';
+import { engageRoutes } from './routes/engage.js';
+import { adminRoutes } from './routes/admin.js';
+import { noGeo } from './geo.js';
 
 const DIST = fileURLToPath(new URL('../../dist', import.meta.url));
 
@@ -26,24 +31,28 @@ function cors(origins) {
   };
 }
 
-export function createApp({ pool, config }) {
+export function createApp({ pool, config, geo = noGeo }) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', config.trustProxy);
 
   const limits = createLimiters(config);
   const auth = authenticate(pool, config);
-  const optionalAuth = authenticate(pool, config, { optional: true });
+  const optionalAuth = authenticate(pool, config, { optional: true, touch: false });
 
   const api = express.Router();
   if (config.corsOrigins.length) api.use(cors(config.corsOrigins));
   api.use(express.json({ limit: '8kb' }));
   api.use('/auth', authRoutes({ pool, config, limits, auth, optionalAuth }));
   api.use(gameRoutes({ pool, limits, auth }));
+  api.use(privacyRoutes({ pool, limits, auth }));
+  api.use(sessionRoutes({ pool, limits, auth, geo }));
+  api.use(engageRoutes({ pool, limits, auth }));
+  api.use('/admin', adminRoutes({ pool, config, limits }));
   api.use((req, res) => res.status(404).json({ error: MSG.notFound }));
   app.use('/api', api);
 
-  if (existsSync(DIST)) app.use(express.static(DIST));
+  if (existsSync(DIST)) app.use(express.static(DIST, { extensions: ['html'] }));
 
   app.use((err, req, res, next) => {
     if (res.headersSent) return next(err);

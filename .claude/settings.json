@@ -8,9 +8,7 @@
       "Edit(**/.env)",
       "Edit(**/.env.local)",
       "Edit(**/.env.production)",
-      "Edit(**/.env.test)",
-      "Read(**/wingrush.env)",
-      "Edit(**/wingrush.env)"
+      "Edit(**/.env.test)"
     ]
   }
 }

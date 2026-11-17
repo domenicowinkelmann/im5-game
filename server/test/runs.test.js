@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { validateRun } from '../src/game/runs.js';
-import { COIN_TYPES, MULTIPLIER, TUNNEL_BONUS, STYLE_PER_SECOND, RUN_LIMITS } from '../../src/shared/economy.js';
+import { validateRun, coinAllowance, maxMultiplierFor, maxTunnelsFor, fitsElapsed } from '../../src/shared/runs.js';
+import { COIN_TYPES, MULTIPLIER, TUNNEL_BONUS, STYLE_PER_SECOND, RUN_LIMITS, CHUNK_LENGTH } from '../../src/shared/economy.js';
 
 function simulate({ seconds = 60, mult = 3, tunnels = 1, counts = { bronze: 10, silver: 6, gold: 2, diamond: 0 } } = {}) {
   const base = Object.entries(counts).reduce((s, [k, n]) => s + n * COIN_TYPES[k].value, 0);
@@ -25,7 +25,7 @@ test('accepts a realistic run', () => {
 });
 
 test('accepts an instant crash with zero duration', () => {
-  const run = simulate({ seconds: 0, tunnels: 0, counts: { bronze: 0, silver: 0, gold: 0, diamond: 0 } });
+  const run = simulate({ seconds: 0, mult: 1, tunnels: 0, counts: { bronze: 0, silver: 0, gold: 0, diamond: 0 } });
   assert.ok(validateRun(run));
 });
 
@@ -56,9 +56,53 @@ test('rejects coins outside of the multiplier range', () => {
 
 test('rejects coins and distance above the time limits', () => {
   const run = simulate({ seconds: 10 });
-  assert.equal(validateRun({ ...run, distance: 10 * RUN_LIMITS.maxSpeed + 51, score: run.score + 10_000 }), null);
-  const counts = { bronze: 0, silver: 0, gold: 0, diamond: 20 };
-  assert.equal(validateRun({ ...simulate({ seconds: 10, mult: 1, counts }) }), null);
+  const tooFar = 10 * RUN_LIMITS.maxSpeed + RUN_LIMITS.distanceBuffer + 1;
+  assert.equal(validateRun({ ...run, distance: tooFar, score: tooFar + run.tunnels * TUNNEL_BONUS }), null);
+  const diamonds = Math.floor(coinAllowance(10) / COIN_TYPES.diamond.value);
+  const fits = simulate({ seconds: 10, mult: 1, counts: { bronze: 0, silver: 0, gold: 0, diamond: diamonds } });
+  assert.ok(validateRun(fits));
+  const counts = { bronze: 0, silver: 0, gold: 0, diamond: diamonds + 1 };
+  assert.equal(validateRun(simulate({ seconds: 10, mult: 1, counts })), null);
+});
+
+test('short runs only get a share of the coin buffer', () => {
+  assert.equal(coinAllowance(0), coinAllowance(1));
+  assert.ok(coinAllowance(1) < RUN_LIMITS.maxCoinsPerSecond + RUN_LIMITS.coinBuffer);
+  const full = RUN_LIMITS.bufferSeconds * RUN_LIMITS.maxCoinsPerSecond + RUN_LIMITS.coinBuffer;
+  assert.equal(coinAllowance(RUN_LIMITS.bufferSeconds), full);
+  const farm = {
+    distance: 50, score: 50, coins: 540, duration: 1, maxMultiplier: 1, tunnels: 0, cause: '',
+    coinsByType: { bronze: 40, silver: 0, gold: 0, diamond: 10 },
+  };
+  assert.equal(validateRun(farm), null);
+});
+
+test('the multiplier has to be reachable in the run time', () => {
+  assert.equal(maxMultiplierFor(0), 1);
+  assert.equal(maxMultiplierFor(MULTIPLIER.stepSeconds - 0.1), 1);
+  assert.equal(maxMultiplierFor(MULTIPLIER.stepSeconds), 2);
+  assert.equal(maxMultiplierFor(MULTIPLIER.stepSeconds * 2 - 0.01), 3);
+  assert.equal(maxMultiplierFor(RUN_LIMITS.maxDuration), MULTIPLIER.max);
+  const base = { distance: 100, score: 100, duration: 3, tunnels: 0, cause: '', coinsByType: { bronze: 0, silver: 0, gold: 0, diamond: 0 }, coins: 0 };
+  assert.ok(validateRun({ ...base, maxMultiplier: 3 }));
+  assert.equal(validateRun({ ...base, maxMultiplier: 4 }), null);
+});
+
+test('tunnels need distance, at most one per chunk', () => {
+  assert.equal(maxTunnelsFor(CHUNK_LENGTH - 1), 0);
+  assert.equal(maxTunnelsFor(CHUNK_LENGTH * 3), 3);
+  const run = simulate({ seconds: 30, tunnels: 0 });
+  const allowed = maxTunnelsFor(run.distance);
+  assert.ok(validateRun({ ...run, tunnels: allowed, score: run.score + allowed * TUNNEL_BONUS }));
+  assert.equal(validateRun({ ...run, tunnels: allowed + 1, score: run.score + (allowed + 1) * TUNNEL_BONUS }), null);
+  const huge = { ...simulate({ seconds: 0, mult: 1, tunnels: 0, counts: { bronze: 0, silver: 0, gold: 0, diamond: 0 } }) };
+  assert.equal(validateRun({ ...huge, tunnels: 65535, score: huge.score + 65535 * TUNNEL_BONUS }), null);
+});
+
+test('a run has to fit into the real time since the last one', () => {
+  assert.ok(fitsElapsed(10, 10 + RUN_LIMITS.minGapSeconds));
+  assert.equal(fitsElapsed(10, 10 + RUN_LIMITS.minGapSeconds - 0.01), false);
+  assert.equal(fitsElapsed(0, 0), false);
 });
 
 test('rejects scores outside of the formula bounds', () => {

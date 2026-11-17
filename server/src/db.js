@@ -1,4 +1,8 @@
 import mariadb from 'mariadb';
+import { ApiError, MSG } from './errors.js';
+
+// mariadb converts Date values with the Node time zone, so it has to match the UTC session
+process.env.TZ = 'UTC';
 
 export function createPool(db) {
   return mariadb.createPool({
@@ -34,4 +38,20 @@ export async function tx(pool, fn) {
       throw e;
     }
   });
+}
+
+export async function lockUser(conn, userId, columns = 'id') {
+  const [user] = await conn.query(`SELECT ${columns} FROM users WHERE id = ? FOR UPDATE`, [userId]);
+  if (!user) throw new ApiError(401, MSG.unauthorized);
+  return user;
+}
+
+export function asJson(v) {
+  if (v == null) return null;
+  if (typeof v !== 'string') return v;
+  try {
+    return JSON.parse(v);
+  } catch {
+    return null;
+  }
 }

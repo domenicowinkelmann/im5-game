@@ -1,6 +1,7 @@
 import * as THREE from 'three';
+import { CHUNK_LENGTH } from '../shared/economy.js';
 
-export const CHUNK_LEN = 160;
+export const CHUNK_LEN = CHUNK_LENGTH;
 const X_MIN = -300, X_MAX = 300;
 const X_SEGS = 80, Z_SEGS = 32;
 

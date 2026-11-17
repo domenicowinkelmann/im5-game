@@ -1,24 +1,25 @@
 import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 
-const ENV_FILES = [
-  fileURLToPath(new URL('../.env', import.meta.url)),
-  fileURLToPath(new URL('../../../wingrush.env', import.meta.url)),
-];
+const ENV_FILE = fileURLToPath(new URL('../.env', import.meta.url));
+const SERVER_DIR = fileURLToPath(new URL('..', import.meta.url));
 
-for (const file of ENV_FILES) {
-  try { process.loadEnvFile(file); } catch {}
-}
+try { process.loadEnvFile(ENV_FILE); } catch {}
 
-function required(name) {
-  const value = process.env[name];
+function required(env, name) {
+  const value = env[name];
   if (value === undefined || value === '') throw new Error(`Missing env var ${name}`);
   return value;
 }
 
-export function loadConfig() {
-  const env = process.env;
+export function geoipPath(env = process.env) {
+  const file = (env.GEOIP_DB || '').trim();
+  return file ? resolve(SERVER_DIR, file) : null;
+}
+
+export function loadConfig(env = process.env) {
   const isTest = env.NODE_ENV === 'test';
-  const database = isTest ? required('DB_NAME_TEST') : required('DB_NAME');
+  const database = isTest ? required(env, 'DB_NAME_TEST') : required(env, 'DB_NAME');
   if (isTest && !database.endsWith('_test')) throw new Error('DB_NAME_TEST must end with _test');
   return {
     isTest,
@@ -26,11 +27,13 @@ export function loadConfig() {
     trustProxy: Number(env.TRUST_PROXY) || false,
     corsOrigins: (env.CORS_ORIGIN || '').split(',').map((s) => s.trim()).filter(Boolean),
     sessionDays: 90,
-    guestRetentionDays: 180,
+    adminSessionHours: 8,
+    jobs: { intervalMinutes: 15, cleanupBatch: 100, purgeHours: 24, purgeBatch: 5000, profileBatch: 200, profileMaxAgeHours: 24 },
+    geoipDb: geoipPath(env),
     db: {
       host: env.DB_HOST || '127.0.0.1',
       port: Number(env.DB_PORT) || 3306,
-      user: required('DB_USER'),
+      user: required(env, 'DB_USER'),
       password: env.DB_PASSWORD ?? '',
       database,
     },

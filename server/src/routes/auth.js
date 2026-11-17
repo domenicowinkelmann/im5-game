@@ -4,6 +4,7 @@ import { tx } from '../db.js';
 import { ApiError, MSG } from '../errors.js';
 import { hashPassword, verifyPassword, createSession } from '../auth.js';
 import { loadProfile } from '../profile.js';
+import { archiveUser } from '../analytics/archive.js';
 
 function credentials(body) {
   return {
@@ -18,7 +19,7 @@ export function authRoutes({ pool, config, limits, auth, optionalAuth }) {
   r.post('/guest', limits.guest, async (req, res) => {
     res.json(await tx(pool, async (conn) => {
       const { insertId } = await conn.query('INSERT INTO users (coins) VALUES (?)', [START_COINS]);
-      const token = await createSession(conn, insertId, config.sessionDays);
+      const token = await createSession(conn, insertId, { hours: config.sessionDays * 24 });
       return { token, profile: await loadProfile(conn, insertId) };
     }));
   });
@@ -34,12 +35,12 @@ export function authRoutes({ pool, config, limits, auth, optionalAuth }) {
     try {
       res.json(await tx(pool, async (conn) => {
         const result = await conn.query(
-          'UPDATE users SET username = ?, password_hash = ? WHERE id = ? AND username IS NULL',
+          'UPDATE users SET username = ?, password_hash = ?, registered_at = NOW(3) WHERE id = ? AND username IS NULL',
           [username, hash, req.user.id],
         );
         if (result.affectedRows !== 1) throw new ApiError(409, MSG.alreadyRegistered);
         await conn.query('DELETE FROM sessions WHERE user_id = ?', [req.user.id]);
-        const token = await createSession(conn, req.user.id, config.sessionDays);
+        const token = await createSession(conn, req.user.id, { hours: config.sessionDays * 24 });
         return { token, profile: await loadProfile(conn, req.user.id) };
       }));
     } catch (e) {
@@ -56,11 +57,15 @@ export function authRoutes({ pool, config, limits, auth, optionalAuth }) {
     if (!ok) throw new ApiError(401, MSG.badLogin);
     res.json(await tx(pool, async (conn) => {
       if (req.user?.username === null) {
-        await conn.query('DELETE FROM users WHERE id = ? AND username IS NULL', [req.user.id]);
+        const [guest] = await conn.query('SELECT id FROM users WHERE id = ? AND username IS NULL FOR UPDATE', [req.user.id]);
+        if (guest) {
+          await archiveUser(conn, guest.id, 'guest_login');
+          await conn.query('DELETE FROM users WHERE id = ?', [guest.id]);
+        }
       } else if (req.user) {
         await conn.query('DELETE FROM sessions WHERE token_hash = ?', [req.tokenHash]);
       }
-      const token = await createSession(conn, user.id, config.sessionDays);
+      const token = await createSession(conn, user.id, { hours: config.sessionDays * 24 });
       return { token, profile: await loadProfile(conn, user.id) };
     }));
   });

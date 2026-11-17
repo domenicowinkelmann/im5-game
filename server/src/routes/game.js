@@ -1,22 +1,14 @@
 import { Router } from 'express';
 import { randomBytes, randomInt } from 'node:crypto';
-import { SPIN_COST, RUN_LIMITS, DOUBLE, PLAYTIME } from '../../../src/shared/economy.js';
+import { SPIN_COST, DOUBLE, PLAYTIME, EVENT_LIMITS, cleanEvent } from '../../../src/shared/economy.js';
 import { rollSpin, spinResult } from '../../../src/shared/slots.js';
 import { getItem } from '../../../src/shared/items.js';
-import { tx, withConn } from '../db.js';
+import { validateRun, fitsElapsed } from '../../../src/shared/runs.js';
+import { tx, withConn, lockUser } from '../db.js';
 import { ApiError, MSG } from '../errors.js';
 import { loadProfile, ownedItems } from '../profile.js';
-import { validateRun } from '../game/runs.js';
 
 const RUN_ID = /^[A-Za-z0-9_-]{22}$/;
-const EVENT_NAME = /^[a-z_]{1,40}$/;
-const MAX_EVENT_BYTES = 2000;
-
-async function lockUser(conn, userId, columns = 'id') {
-  const [user] = await conn.query(`SELECT ${columns} FROM users WHERE id = ? FOR UPDATE`, [userId]);
-  if (!user) throw new ApiError(401, MSG.unauthorized);
-  return user;
-}
 
 export function gameRoutes({ pool, limits, auth }) {
   const r = Router();
@@ -40,14 +32,14 @@ export function gameRoutes({ pool, limits, auth }) {
     const uid = req.user.id;
     res.json(await tx(pool, async (conn) => {
       const user = await lockUser(conn, uid,
-        'highscore, TIMESTAMPDIFF(MICROSECOND, COALESCE(last_run_at, created_at), NOW(3)) / 1000000 AS elapsed');
-      if (run.duration > Number(user.elapsed) + RUN_LIMITS.timeSlack) throw new ApiError(400, MSG.runRejected);
+        'highscore, session_no, TIMESTAMPDIFF(MICROSECOND, COALESCE(last_run_at, created_at), NOW(3)) / 1000000 AS elapsed');
+      if (!fitsElapsed(run.duration, Number(user.elapsed))) throw new ApiError(400, MSG.runRejected);
       const runId = randomBytes(16).toString('base64url');
       const durationMs = Math.round(run.duration * 1000);
       await conn.query(
-        `INSERT INTO runs (public_id, user_id, distance, score, coins, duration_ms, max_multiplier, tunnels, cause, coins_by_type)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [runId, uid, run.distance, run.score, run.coins, durationMs,
+        `INSERT INTO runs (public_id, user_id, session_no, distance, score, coins, duration_ms, max_multiplier, tunnels, cause, coins_by_type)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [runId, uid, user.session_no, run.distance, run.score, run.coins, durationMs,
           run.maxMultiplier, run.tunnels, run.cause, JSON.stringify(run.coinsByType)],
       );
       await conn.query(
@@ -90,7 +82,7 @@ export function gameRoutes({ pool, limits, auth }) {
   r.post('/spin', auth, limits.play, async (req, res) => {
     const uid = req.user.id;
     res.json(await tx(pool, async (conn) => {
-      const user = await lockUser(conn, uid, 'coins');
+      const user = await lockUser(conn, uid, 'coins, session_no');
       if (user.coins < SPIN_COST) throw new ApiError(400, MSG.notEnoughCoins);
       const owned = await ownedItems(conn, uid);
       const [{ gap_ms: gapMs }] = await conn.query(
@@ -107,8 +99,10 @@ export function gameRoutes({ pool, limits, auth }) {
         [delta, slotMs, uid],
       );
       await conn.query(
-        'INSERT INTO spins (user_id, outcome, reels, item_id, duplicate, coins_delta) VALUES (?, ?, ?, ?, ?, ?)',
-        [uid, spin.outcome, JSON.stringify(spin.reels), spin.item?.id ?? null, result.duplicate ? 1 : 0, delta],
+        `INSERT INTO spins (user_id, session_no, outcome, reels, item_id, duplicate, coins_delta, slot_ms)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [uid, user.session_no, spin.outcome, JSON.stringify(spin.reels), spin.item?.id ?? null,
+          result.duplicate ? 1 : 0, delta, slotMs],
       );
       return { reels: spin.reels, result, profile: await loadProfile(conn, uid) };
     }));
@@ -131,11 +125,13 @@ export function gameRoutes({ pool, limits, auth }) {
 
   r.post('/events', auth, limits.events, async (req, res) => {
     const { name, data } = req.body ?? {};
-    if (typeof name !== 'string' || !EVENT_NAME.test(name)) throw new ApiError(400, MSG.badEvent);
-    if (data != null && (typeof data !== 'object' || Array.isArray(data))) throw new ApiError(400, MSG.badEvent);
-    const json = data == null ? null : JSON.stringify(data);
-    if (json && Buffer.byteLength(json) > MAX_EVENT_BYTES) throw new ApiError(400, MSG.badEvent);
-    await pool.query('INSERT INTO events (user_id, name, data) VALUES (?, ?, ?)', [req.user.id, name, json]);
+    const event = cleanEvent(name, data);
+    if (!event) throw new ApiError(400, MSG.badEvent);
+    if (data != null && Buffer.byteLength(JSON.stringify(data)) > EVENT_LIMITS.maxBytes) throw new ApiError(400, MSG.badEvent);
+    await pool.query(
+      'INSERT INTO events (user_id, name, data) SELECT id, ?, ? FROM users WHERE id = ? AND consent_stats = 1',
+      [event.name, event.data && JSON.stringify(event.data), req.user.id],
+    );
     res.json({ ok: true });
   });
 

@@ -1,14 +1,12 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { startServer } from './helpers.js';
+import { startServer, PROFILE_KEYS } from './helpers.js';
 import { START_COINS, SPIN_COST, DOUBLE, RUN_LIMITS, PLAYTIME } from '../../src/shared/economy.js';
 import { DEFAULT_LOADOUT, ITEMS } from '../../src/shared/items.js';
 
 let app;
 before(async () => { app = await startServer(); });
 after(async () => { await app.stop(); });
-
-const PROFILE_KEYS = ['bestDistance', 'coins', 'equipped', 'highscore', 'inventory', 'playTime', 'totalRuns', 'userId', 'username'];
 
 const RUN = {
   distance: 1200, score: 1900, coins: 30, duration: 40, maxMultiplier: 2, tunnels: 1,
@@ -40,8 +38,12 @@ test('guest gets a profile shaped like the mock', async () => {
   assert.deepEqual(profile.inventory, ITEMS.filter((i) => i.default).map((i) => i.id));
   assert.deepEqual(profile.equipped, DEFAULT_LOADOUT);
   assert.deepEqual(profile.playTime, { flight: 0, slots: 0, total: 0 });
+  assert.deepEqual(profile.consent, { decided: false, stats: false, personal: false, adult: false });
   const me = await app.call('GET', '/me', { token });
   assert.deepEqual(me.body, profile);
+  const [row] = await app.pool.query('SELECT registered_at, session_no FROM users WHERE id = ?', [Number(profile.userId)]);
+  assert.equal(row.registered_at, null);
+  assert.equal(row.session_no, 1);
 });
 
 test('requests without a valid token get 401', async () => {
@@ -69,6 +71,10 @@ test('signup upgrades the guest and keeps progress', async () => {
   assert.notEqual(res.body.token, g.token);
   assert.equal((await app.call('GET', '/me', { token: g.token })).status, 401);
   assert.equal((await app.call('GET', '/me', { token: res.body.token })).status, 200);
+  const [row] = await app.pool.query(
+    'SELECT registered_at IS NOT NULL AND registered_at >= NOW(3) - INTERVAL 1 MINUTE AS recent FROM users WHERE id = ?',
+    [Number(g.profile.userId)]);
+  assert.equal(row.recent, 1);
   const again = await app.call('POST', '/auth/signup', { token: res.body.token, body: { username: 'Anders', password: 'geheim123' } });
   assert.deepEqual(again, { status: 409, body: { error: 'Bereits angemeldet' } });
 });
@@ -101,13 +107,20 @@ test('login, wrong credentials and logout', async () => {
   assert.deepEqual(unknown, wrong);
   assert.equal((await app.call('POST', '/auth/login', { body: {} })).status, 401);
 
-  const g = await guest();
+  const g = await agedGuest();
+  assert.equal((await app.call('POST', '/runs', { token: g.token, body: RUN })).status, 200);
+  const [{ last }] = await app.pool.query('SELECT COALESCE(MAX(id), 0) AS last FROM player_archive');
   const ok = await app.call('POST', '/auth/login', { token: g.token, body: { username: 'pilotin', password: 'richtig123' } });
   assert.equal(ok.status, 200);
   assert.equal(ok.body.profile.username, 'Pilotin');
   assert.equal((await app.call('GET', '/me', { token: g.token })).status, 401);
   const [orphan] = await app.pool.query('SELECT COUNT(*) AS n FROM users WHERE id = ?', [Number(g.profile.userId)]);
   assert.equal(orphan.n, 0);
+  const archived = await app.pool.query('SELECT id, reason, registered, runs, play_s FROM player_archive WHERE id > ?', [last]);
+  assert.deepEqual(archived.map(({ reason, registered, runs, play_s: playS }) => ({ reason, registered, runs, playS })),
+    [{ reason: 'guest_login', registered: 0, runs: 1, playS: RUN.duration }]);
+  const [day] = await app.pool.query('SELECT runs, flight_s FROM player_archive_days WHERE archive_id = ?', [archived[0].id]);
+  assert.deepEqual({ ...day }, { runs: 1, flight_s: RUN.duration });
 
   assert.deepEqual(await app.call('POST', '/auth/logout', { token: ok.body.token }), { status: 200, body: { ok: true } });
   assert.equal((await app.call('GET', '/me', { token: ok.body.token })).status, 401);
@@ -135,12 +148,31 @@ test('runs are rejected when implausible or faster than real time', async () => 
   const fresh = await guest();
   const tooFast = await app.call('POST', '/runs', { token: fresh.token, body: RUN });
   assert.equal(tooFast.status, 400);
-  const short = { ...RUN, duration: 1, distance: 50, score: 50 + 250, coins: 10, coinsByType: { bronze: 10, silver: 0, gold: 0, diamond: 0 }, maxMultiplier: 1 };
-  assert.ok(short.duration <= RUN_LIMITS.timeSlack);
+  const short = { ...RUN, duration: 1, distance: 50, score: 50, coins: 10, coinsByType: { bronze: 10, silver: 0, gold: 0, diamond: 0 }, maxMultiplier: 1, tunnels: 0 };
+  assert.equal((await app.call('POST', '/runs', { token: fresh.token, body: short })).status, 400);
+  await app.pool.query('UPDATE users SET created_at = NOW(3) - INTERVAL 3 SECOND WHERE id = ?', [Number(fresh.profile.userId)]);
   assert.equal((await app.call('POST', '/runs', { token: fresh.token, body: short })).status, 200);
-  assert.equal((await app.call('POST', '/runs', { token: fresh.token, body: RUN })).status, 400);
+  assert.equal((await app.call('POST', '/runs', { token: fresh.token, body: { ...short, duration: 0 } })).status, 400);
   const [u] = await app.pool.query('SELECT total_runs FROM users WHERE id = ?', [Number(fresh.profile.userId)]);
   assert.equal(u.total_runs, 1);
+});
+
+test('short runs in a loop cannot farm coins', async () => {
+  const g = await agedGuest();
+  const uid = Number(g.profile.userId);
+  const farm = {
+    distance: 50, score: 50, coins: 540, duration: 1, maxMultiplier: 1, tunnels: 0, cause: '',
+    coinsByType: { bronze: 40, silver: 0, gold: 0, diamond: 10 },
+  };
+  assert.deepEqual(await app.call('POST', '/runs', { token: g.token, body: farm }), { status: 400, body: { error: 'Run abgelehnt (unplausibel)' } });
+  const fair = { ...farm, coins: 100, coinsByType: { bronze: 0, silver: 0, gold: 10, diamond: 0 } };
+  assert.ok(fair.coins <= RUN_LIMITS.maxCoinsPerSecond + RUN_LIMITS.coinBuffer / RUN_LIMITS.bufferSeconds);
+  const results = [];
+  for (let i = 0; i < 5; i++) results.push((await app.call('POST', '/runs', { token: g.token, body: fair })).status);
+  assert.deepEqual(results, [200, 400, 400, 400, 400]);
+  const [u] = await app.pool.query('SELECT coins, play_flight_ms FROM users WHERE id = ?', [uid]);
+  assert.equal(u.coins, START_COINS + fair.coins);
+  assert.equal(u.play_flight_ms, 1000);
 });
 
 test('parallel runs: only one fits into the elapsed time', async () => {
@@ -234,9 +266,10 @@ test('equip only owned items', async () => {
 
 test('events are validated and stored', async () => {
   const g = await guest();
+  assert.equal((await app.consent(g.token, { stats: true })).status, 200);
   assert.deepEqual(await app.call('POST', '/events', { token: g.token, body: { name: 'run_start', data: { runs: 0 } } }), { status: 200, body: { ok: true } });
   assert.equal((await app.call('POST', '/events', { token: g.token, body: { name: 'run_start' } })).status, 200);
-  for (const body of [{ name: 'Böse' }, { name: 'x'.repeat(41) }, { name: 'ok', data: [1] }, { name: 'ok', data: 'str' }, { name: 'ok', data: { s: 'x'.repeat(2100) } }]) {
+  for (const body of [{ name: 'Böse' }, { name: 'x'.repeat(41) }, { name: 'ok' }, { name: 'run_end', data: [1] }, { name: 'run_end', data: 'str' }, { name: 'run_end', data: { cause: 'x'.repeat(2100) } }]) {
     assert.equal((await app.call('POST', '/events', { token: g.token, body })).status, 400, JSON.stringify(body).slice(0, 40));
   }
   const [{ n }] = await app.pool.query('SELECT COUNT(*) AS n FROM events WHERE user_id = ?', [Number(g.profile.userId)]);
@@ -266,6 +299,27 @@ test('play time counts flight time and time at the slot machine', async () => {
 
   const signup = await app.call('POST', '/auth/signup', { token: g.token, body: { username: 'Zeitmesser', password: 'geheim123' } });
   assert.deepEqual(signup.body.profile.playTime, t);
+});
+
+test('runs and spins store the session number and spins the slot time', async () => {
+  const g = await agedGuest();
+  const uid = Number(g.profile.userId);
+  assert.equal((await app.call('POST', '/runs', { token: g.token, body: RUN })).status, 200);
+  await setCoins(uid, SPIN_COST * 2);
+  assert.equal((await app.call('POST', '/spin', { token: g.token })).status, 200);
+  await app.pool.query(
+    'UPDATE users SET last_seen_at = NOW(3) - INTERVAL 31 MINUTE, last_run_at = NOW(3) - INTERVAL 1 HOUR WHERE id = ?', [uid]);
+  await app.pool.query('UPDATE spins SET created_at = NOW(3) - INTERVAL 20 SECOND WHERE user_id = ?', [uid]);
+  assert.equal((await app.call('POST', '/runs', { token: g.token, body: RUN })).status, 200);
+  assert.equal((await app.call('POST', '/spin', { token: g.token })).status, 200);
+  const runs = await app.pool.query('SELECT session_no FROM runs WHERE user_id = ? ORDER BY id', [uid]);
+  assert.deepEqual(runs.map((r) => r.session_no), [1, 2]);
+  const spins = await app.pool.query('SELECT session_no, slot_ms FROM spins WHERE user_id = ? ORDER BY id', [uid]);
+  assert.deepEqual(spins.map((r) => r.session_no), [1, 2]);
+  assert.equal(spins[0].slot_ms, PLAYTIME.spinSeconds * 1000);
+  assert.ok(spins[1].slot_ms >= 20000 && spins[1].slot_ms < 22000, String(spins[1].slot_ms));
+  const [u] = await app.pool.query('SELECT play_slot_ms FROM users WHERE id = ?', [uid]);
+  assert.equal(u.play_slot_ms, spins[0].slot_ms + spins[1].slot_ms);
 });
 
 test('health check', async () => {

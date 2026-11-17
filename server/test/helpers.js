@@ -4,7 +4,9 @@ import { loadConfig } from '../src/config.js';
 import { createPool } from '../src/db.js';
 import { createApp } from '../src/app.js';
 
-const TABLES = ['events', 'spins', 'runs', 'loadout', 'inventory', 'sessions', 'users'];
+export const PROFILE_KEYS = ['bestDistance', 'coins', 'consent', 'equipped', 'highscore', 'inventory', 'playTime', 'totalRuns', 'userId', 'username'];
+
+const TABLES = ['player_archive_days', 'player_archive', 'decisions', 'player_profiles', 'play_sessions', 'events', 'spins', 'runs', 'loadout', 'inventory', 'sessions', 'users'];
 
 export async function resetDatabase(config) {
   const sql = await readFile(new URL('../sql/schema.sql', import.meta.url), 'utf8');
@@ -17,30 +19,35 @@ export async function resetDatabase(config) {
   }
 }
 
-export async function startServer() {
-  const config = loadConfig();
+export async function startServer({ geo } = {}) {
+  const config = loadConfig({ ...process.env, NODE_ENV: 'test' });
   await resetDatabase(config);
   const pool = createPool(config.db);
-  const server = createApp({ pool, config }).listen(0);
+  const server = createApp({ pool, config, geo }).listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   const base = `http://127.0.0.1:${server.address().port}/api`;
 
-  async function call(method, path, { body, token, raw } = {}) {
+  async function call(method, path, { body, token, raw, headers } = {}) {
     const res = await fetch(base + path, {
       method,
       headers: {
         ...(body !== undefined || raw !== undefined ? { 'Content-Type': 'application/json' } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...headers,
       },
       body: raw ?? (body === undefined ? undefined : JSON.stringify(body)),
     });
     return { status: res.status, body: await res.json() };
   }
 
+  const consent = (token, flags = {}) => call('POST', '/consent', {
+    token, body: { stats: false, personal: false, adult: false, ...flags },
+  });
+
   async function stop() {
     await new Promise((resolve) => server.close(resolve));
     await pool.end();
   }
 
-  return { call, pool, stop };
+  return { base, call, consent, pool, config, stop };
 }
